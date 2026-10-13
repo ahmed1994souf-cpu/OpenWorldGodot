@@ -1,0 +1,104 @@
+name: Build MotionBricks Android ARM64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build MotionBricks for Android ARM64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            ninja-build \
+            python3 \
+            unzip
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK
+        run: |
+          sdkmanager "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;27.2.12479018"
+
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Configure MotionBricks native library
+        working-directory: native/motion_bricks
+        run: |
+          cmake -S . \
+            -B "$GITHUB_WORKSPACE/build/android-arm64" \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_ANDROID_NDK="$ANDROID_NDK_HOME" \
+            -DGODOTCPP_API_VERSION=4.7 \
+            -DMOTIONBRICKS_BUILD_TESTS=OFF \
+            -DMOTIONBRICKS_ENABLE_VULKAN=OFF \
+            -DMOTIONBRICKS_ENABLE_PHYSICS=OFF
+
+      - name: Build MotionBricks GDExtension
+        run: |
+          cmake --build build/android-arm64 \
+            --target motion_bricks_godot \
+            -j2
+
+      - name: Download and verify MotionBricks model
+        run: |
+          git clone --depth 1 \
+            https://github.com/localai-org/motion-bricks.cpp.git \
+            /tmp/motion-bricks.cpp
+
+          python3 \
+            /tmp/motion-bricks.cpp/scripts/download_gguf_weights.py \
+            --output motion_bricks/generated
+
+      - name: Install Android library
+        run: |
+          mkdir -p addons/motion_bricks/bin/android.release.arm64
+
+          LIB=$(find build/android-arm64 \
+            -type f \
+            -name "libmotion_bricks_godot.so" \
+            | head -n 1)
+
+          if [ -z "$LIB" ]; then
+            echo "MotionBricks Android library was not produced."
+            exit 1
+          fi
+
+          cp "$LIB" \
+            addons/motion_bricks/bin/android.release.arm64/
+
+          ls -lh \
+            addons/motion_bricks/bin/android.release.arm64/
+
+      - name: Package MotionBricks Android runtime
+        run: |
+          mkdir -p dist
+
+          zip -r \
+            dist/MotionBricks-Android-ARM64-runtime.zip \
+            addons/motion_bricks/bin/android.release.arm64 \
+            motion_bricks/generated
+
+          ls -lh dist/
+
+      - name: Upload Android runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: MotionBricks-Android-ARM64-runtime
+          path: dist/MotionBricks-Android-ARM64-runtime.zip
+          retention-days: 14

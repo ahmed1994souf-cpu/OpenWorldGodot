@@ -11,34 +11,36 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repository with LFS
         uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 1
 
-      - name: Find character model files
+      - name: Check repository and player model
         shell: bash
         run: |
-          set +e
+          set -e
 
-          echo "=== Repository files ==="
-          find . -type f | sort | head -500
-
-          echo
-          echo "=== GLB files ==="
-          find . -type f \( -iname "*.glb" -o -iname "*.gltf" \) -print
+          echo "=== Repository root ==="
+          ls -la
 
           echo
-          echo "=== FBX files ==="
-          find . -type f -iname "*.fbx" -print
+          echo "=== Player model files ==="
+          find . -type f \( \
+            -iname "*.glb" \
+            -o -iname "*.gltf" \
+            -o -iname "*.fbx" \
+          \) -print
 
           echo
-          echo "=== TSCN files ==="
-          find . -type f -iname "*.tscn" -print
+          echo "=== Player files ==="
+          find . -type f -iname "*player*" -print
 
           echo
-          echo "=== Referenced player paths ==="
-          grep -RniE "player\.glb|player\.gltf|player\.fbx|Skeleton3D" . \
-            --exclude-dir=.git \
-            2>/dev/null | head -200 || true
+          echo "=== Git LFS status ==="
+          git lfs version || true
+          git lfs ls-files || true
 
       - name: Install Godot 4.7.2
         shell: bash
@@ -55,9 +57,51 @@ jobs:
             /tmp/godot/Godot_v4.7.2-stable_linux.x86_64 \
             /usr/local/bin/godot
 
+          echo
+          echo "=== Godot version ==="
           godot --version
 
-      - name: Create model inspector
+      - name: Check player.glb
+        shell: bash
+        run: |
+          set +e
+
+          echo "=== Searching for player.glb ==="
+
+          PLAYER_FILE="$(find . -type f -iname "player.glb" | head -1)"
+
+          if [ -z "$PLAYER_FILE" ]; then
+            echo "WARNING: player.glb was not found."
+          else
+            echo "Found player model:"
+            echo "$PLAYER_FILE"
+
+            echo
+            echo "File information:"
+            ls -lh "$PLAYER_FILE"
+            file "$PLAYER_FILE" || true
+
+            echo
+            echo "First bytes:"
+            xxd -l 32 "$PLAYER_FILE" || true
+          fi
+
+      - name: Import Godot resources
+        shell: bash
+        run: |
+          set -o pipefail
+
+          echo "=== Importing Godot resources ==="
+
+          godot \
+            --headless \
+            --editor \
+            --path . \
+            --import \
+            --quit \
+            2>&1 | tee godot_import.log
+
+      - name: Create Skeleton3D inspector
         shell: bash
         run: |
           mkdir -p tools
@@ -69,52 +113,167 @@ jobs:
               call_deferred("_inspect")
 
           func _inspect() -> void:
-              print("=== SEARCHING FOR SKELETON3D ===")
+              print("")
+              print("========================================")
+              print("        PLAYER SKELETON INSPECTOR")
+              print("========================================")
+              print("")
 
               var models := _find_model_files("res://")
 
               print("Model files found: ", models.size())
+              print("")
+
+              var report := FileAccess.open(
+                  "res://skeleton_report.txt",
+                  FileAccess.WRITE
+              )
+
+              if report == null:
+                  printerr("Could not create skeleton_report.txt")
+                  quit(1)
+                  return
+
+              report.store_line("PLAYER SKELETON INSPECTION")
+              report.store_line("")
+
+              if models.is_empty():
+                  print("NO GLB/GLTF/FBX FILES FOUND")
+
+                  report.store_line(
+                      "NO GLB/GLTF/FBX FILES FOUND"
+                  )
+
+                  report.close()
+                  quit(0)
+                  return
 
               for path in models:
-                  print("")
+                  print("----------------------------------------")
                   print("MODEL: ", path)
+                  print("----------------------------------------")
+
+                  report.store_line(
+                      "MODEL: %s" % path
+                  )
 
                   var packed := load(path) as PackedScene
 
                   if packed == null:
-                      print("Could not load.")
+                      print("Could not load model.")
+
+                      report.store_line(
+                          "ERROR: Could not load model."
+                      )
+
+                      report.store_line("")
                       continue
 
                   var instance := packed.instantiate()
+
+                  if instance == null:
+                      print("Could not instantiate model.")
+
+                      report.store_line(
+                          "ERROR: Could not instantiate model."
+                      )
+
+                      report.store_line("")
+                      continue
+
                   root.add_child(instance)
 
-                  var skeletons: Array[Skeleton3D] = []
-                  _find_skeletons(instance, skeletons)
+                  await process_frame
 
-                  print("Skeleton count: ", skeletons.size())
+                  var skeletons: Array[Skeleton3D] = []
+
+                  _find_skeletons(
+                      instance,
+                      skeletons
+                  )
+
+                  print(
+                      "Skeleton3D count: ",
+                      skeletons.size()
+                  )
+
+                  report.store_line(
+                      "Skeleton3D count: %d"
+                      % skeletons.size()
+                  )
 
                   for skeleton in skeletons:
-                      print("Skeleton: ", skeleton.get_path())
-                      print("Bones: ", skeleton.get_bone_count())
-
-                      for i in range(skeleton.get_bone_count()):
-                          print(
-                              "  ",
-                              i,
-                              " ",
-                              skeleton.get_bone_name(i),
-                              " parent=",
-                              skeleton.get_bone_parent(i)
-                          )
+                      _write_skeleton(
+                          skeleton,
+                          report
+                      )
 
                   instance.queue_free()
 
-              print("")
-              print("=== DONE ===")
+                  await process_frame
+
+                  report.store_line("")
+                  print("")
+
+              report.close()
+
+              print("========================================")
+              print("             INSPECTION DONE")
+              print("========================================")
 
               quit(0)
 
-          func _find_model_files(path: String) -> Array[String]:
+          func _write_skeleton(
+              skeleton: Skeleton3D,
+              report: FileAccess
+          ) -> void:
+
+              print("")
+              print("SKELETON: ", skeleton.get_path())
+              print(
+                  "BONE COUNT: ",
+                  skeleton.get_bone_count()
+              )
+
+              report.store_line(
+                  "SKELETON: %s"
+                  % skeleton.get_path()
+              )
+
+              report.store_line(
+                  "BONE COUNT: %d"
+                  % skeleton.get_bone_count()
+              )
+
+              report.store_line(
+                  "INDEX | BONE NAME | PARENT"
+              )
+
+              for i in range(
+                  skeleton.get_bone_count()
+              ):
+                  var bone_name := \
+                      skeleton.get_bone_name(i)
+
+                  var parent := \
+                      skeleton.get_bone_parent(i)
+
+                  var line := \
+                      "%d | %s | %d" % [
+                          i,
+                          bone_name,
+                          parent
+                      ]
+
+                  print(line)
+                  report.store_line(line)
+
+              report.store_line("")
+
+          func _find_model_files(
+              path: String
+          ) -> Array[String]:
+
               var result: Array[String] = []
 
               var dir := DirAccess.open(path)
@@ -133,19 +292,27 @@ jobs:
                   if item == "." or item == "..":
                       continue
 
-                  var full_path := path.path_join(item)
+                  var full_path := \
+                      path.path_join(item)
 
                   if dir.current_is_dir():
+
                       if not item.begins_with("."):
                           result.append_array(
-                              _find_model_files(full_path)
+                              _find_model_files(
+                                  full_path
+                              )
                           )
+
                   else:
-                      var lower := item.to_lower()
+
+                      var lower := \
+                          item.to_lower()
 
                       if lower.ends_with(".glb") \
                       or lower.ends_with(".gltf") \
                       or lower.ends_with(".fbx"):
+
                           result.append(full_path)
 
               dir.list_dir_end()
@@ -156,17 +323,25 @@ jobs:
               node: Node,
               result: Array[Skeleton3D]
           ) -> void:
+
               if node is Skeleton3D:
-                  result.append(node)
+                  result.append(
+                      node as Skeleton3D
+                  )
 
               for child in node.get_children():
-                  _find_skeletons(child, result)
+                  _find_skeletons(
+                      child,
+                      result
+                  )
           EOF
 
-      - name: Run Godot skeleton inspection
+      - name: Run Skeleton3D inspection
         shell: bash
         run: |
           set -o pipefail
+
+          echo "=== Running Godot skeleton inspection ==="
 
           godot \
             --headless \
@@ -174,41 +349,117 @@ jobs:
             --script tools/find_skeletons.gd \
             2>&1 | tee skeleton_console.log
 
-      - name: Inspect MotionBricks joint API
+      - name: Download MotionBricks source
         shell: bash
         run: |
           set -e
 
-          git clone --depth 1 \
+          rm -rf /tmp/motion-bricks
+
+          git clone \
+            --depth 1 \
             https://github.com/localai-org/motion-bricks.cpp.git \
             /tmp/motion-bricks
 
-          {
-            echo "=== MotionBricks headers ==="
+      - name: Inspect MotionBricks joint API
+        shell: bash
+        run: |
+          set +e
 
-            find /tmp/motion-bricks \
-              -maxdepth 3 \
-              -type f \
-              \( -name "*.h" -o -name "*.hpp" \) \
-              | sort
+          echo "=== MotionBricks header files ==="
+
+          find /tmp/motion-bricks \
+            -type f \
+            \( \
+              -name "*.h" \
+              -o -name "*.hpp" \
+            \) \
+            | sort \
+            | tee motionbricks_headers.txt
+
+          echo
+          echo "=== Joint-related API ==="
+
+          grep -RniE \
+            "joint.*name|name.*joint|joint.*string|get_joint" \
+            /tmp/motion-bricks \
+            2>/dev/null \
+            | head -300 \
+            | tee motionbricks_joint_api.txt || true
+
+          echo
+          echo "=== MotionBricks mb_model API ==="
+
+          grep -RniE \
+            "mb_model_" \
+            /tmp/motion-bricks/include \
+            /tmp/motion-bricks/src \
+            2>/dev/null \
+            | head -300 \
+            | tee motionbricks_model_api.txt || true
+
+      - name: Create complete inspection summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "========================================"
+            echo "PLAYER + MOTIONBRICKS INSPECTION"
+            echo "========================================"
+            echo
+
+            echo "=== MODEL FILES ==="
+            find . -type f \( \
+              -iname "*.glb" \
+              -o -iname "*.gltf" \
+              -o -iname "*.fbx" \
+            \) -print || true
 
             echo
-            echo "=== Joint-related API ==="
+            echo "=== PLAYER FILES ==="
+            find . -type f \
+              -iname "*player*" \
+              -print || true
 
-            grep -RniE \
-              "joint.*name|name.*joint|joint.*string|get_joint" \
-              /tmp/motion-bricks/include \
-              /tmp/motion-bricks/src \
-              2>/dev/null \
-              | head -200 || true
+            echo
+            echo "=== SKELETON REPORT ==="
 
-          } | tee motionbricks_joint_api.txt
+            if [ -f skeleton_report.txt ]; then
+              cat skeleton_report.txt
+            else
+              echo "No skeleton_report.txt generated."
+            fi
 
-      - name: Upload inspection report
+            echo
+            echo "=== GODOT IMPORT LOG ==="
+
+            if [ -f godot_import.log ]; then
+              tail -300 godot_import.log
+            else
+              echo "No Godot import log."
+            fi
+
+            echo
+            echo "=== MOTIONBRICKS JOINT API ==="
+
+            if [ -f motionbricks_joint_api.txt ]; then
+              cat motionbricks_joint_api.txt
+            else
+              echo "No MotionBricks API report."
+            fi
+
+          } | tee complete_inspection.txt
+
+      - name: Upload inspection artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: player-skeleton-inspection
           path: |
+            complete_inspection.txt
+            skeleton_report.txt
             skeleton_console.log
+            godot_import.log
+            motionbricks_headers.txt
             motionbricks_joint_api.txt
+            motionbricks_model_api.txt

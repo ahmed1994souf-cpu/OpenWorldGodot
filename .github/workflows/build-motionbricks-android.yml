@@ -19,19 +19,47 @@ jobs:
           sudo apt-get install -y \
             ninja-build \
             python3 \
-            unzip
+            unzip \
+            git \
+            cmake
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
 
-      - name: Install Android NDK
+      - name: Install Android SDK and NDK
         run: |
-          sdkmanager "platform-tools" \
+          yes | sdkmanager --licenses || true
+
+          sdkmanager \
+            "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0" \
             "ndk;27.2.12479018"
 
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
+
+      - name: Check Android NDK
+        run: |
+          echo "Android SDK: $ANDROID_SDK_ROOT"
+          echo "Android NDK: $ANDROID_NDK_HOME"
+          test -d "$ANDROID_NDK_HOME"
+          ls -la "$ANDROID_NDK_HOME"
+
+      - name: Check MotionBricks source
+        run: |
+          if [ ! -f "native/motion_bricks/CMakeLists.txt" ]; then
+            echo "ERROR: native/motion_bricks/CMakeLists.txt is missing."
+            echo "The MotionBricks native source files must exist in the repository."
+            exit 1
+          fi
+
+          if [ ! -f "native/motion_bricks/motion_bricks_native.cpp" ]; then
+            echo "ERROR: motion_bricks_native.cpp is missing."
+            exit 1
+          fi
+
+          echo "MotionBricks source found."
 
       - name: Configure MotionBricks native library
         working-directory: native/motion_bricks
@@ -47,7 +75,8 @@ jobs:
             -DGODOTCPP_API_VERSION=4.7 \
             -DMOTIONBRICKS_BUILD_TESTS=OFF \
             -DMOTIONBRICKS_ENABLE_VULKAN=OFF \
-            -DMOTIONBRICKS_ENABLE_PHYSICS=OFF
+            -DMOTIONBRICKS_ENABLE_PHYSICS=OFF \
+            -DMOTIONBRICKS_DOWNLOAD_MODELS=OFF
 
       - name: Build MotionBricks GDExtension
         run: |
@@ -55,7 +84,29 @@ jobs:
             --target motion_bricks_godot \
             -j2
 
-      - name: Download and verify MotionBricks model
+      - name: Find Android library
+        run: |
+          echo "Searching for MotionBricks Android library..."
+
+          find build/android-arm64 \
+            -type f \
+            -name "libmotion_bricks_godot.so" \
+            -print
+
+          LIB=$(find build/android-arm64 \
+            -type f \
+            -name "libmotion_bricks_godot.so" \
+            | head -n 1)
+
+          if [ -z "$LIB" ]; then
+            echo "ERROR: libmotion_bricks_godot.so was not produced."
+            exit 1
+          fi
+
+          echo "Found library:"
+          ls -lh "$LIB"
+
+      - name: Download official MotionBricks model
         run: |
           git clone --depth 1 \
             https://github.com/localai-org/motion-bricks.cpp.git \
@@ -65,7 +116,7 @@ jobs:
             /tmp/motion-bricks.cpp/scripts/download_gguf_weights.py \
             --output motion_bricks/generated
 
-      - name: Install Android library
+      - name: Install Android GDExtension
         run: |
           mkdir -p addons/motion_bricks/bin/android.release.arm64
 
@@ -75,17 +126,32 @@ jobs:
             | head -n 1)
 
           if [ -z "$LIB" ]; then
-            echo "MotionBricks Android library was not produced."
+            echo "ERROR: MotionBricks library not found."
             exit 1
           fi
 
           cp "$LIB" \
             addons/motion_bricks/bin/android.release.arm64/
 
-          ls -lh \
-            addons/motion_bricks/bin/android.release.arm64/
+          echo "Installed library:"
+          ls -lh addons/motion_bricks/bin/android.release.arm64/
 
-      - name: Package MotionBricks Android runtime
+      - name: Verify MotionBricks runtime files
+        run: |
+          echo "=== Native library ==="
+          find addons/motion_bricks/bin \
+            -type f \
+            -maxdepth 3 \
+            -print
+
+          echo ""
+          echo "=== Model files ==="
+          find motion_bricks/generated \
+            -type f \
+            -maxdepth 4 \
+            -print | head -100
+
+      - name: Package MotionBricks Android ARM64 runtime
         run: |
           mkdir -p dist
 
@@ -94,6 +160,8 @@ jobs:
             addons/motion_bricks/bin/android.release.arm64 \
             motion_bricks/generated
 
+          echo ""
+          echo "=== Final artifact ==="
           ls -lh dist/
 
       - name: Upload Android runtime
@@ -101,4 +169,5 @@ jobs:
         with:
           name: MotionBricks-Android-ARM64-runtime
           path: dist/MotionBricks-Android-ARM64-runtime.zip
+          if-no-files-found: error
           retention-days: 14

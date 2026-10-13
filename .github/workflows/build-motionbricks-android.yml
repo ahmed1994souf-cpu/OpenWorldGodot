@@ -7,12 +7,20 @@ jobs:
   build:
     name: Build MotionBricks for Android ARM64
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
 
     steps:
+
+      # ---------------------------------------------------------
+      # 1. Get the Godot project
+      # ---------------------------------------------------------
       - name: Checkout repository
         uses: actions/checkout@v4
 
+
+      # ---------------------------------------------------------
+      # 2. Install build tools
+      # ---------------------------------------------------------
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -23,9 +31,17 @@ jobs:
             git \
             cmake
 
+
+      # ---------------------------------------------------------
+      # 3. Setup Android SDK
+      # ---------------------------------------------------------
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
+
+      # ---------------------------------------------------------
+      # 4. Install Android platform + NDK
+      # ---------------------------------------------------------
       - name: Install Android SDK and NDK
         run: |
           yes | sdkmanager --licenses || true
@@ -39,29 +55,1311 @@ jobs:
           echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
-      - name: Check Android NDK
+
+      # ---------------------------------------------------------
+      # 5. Create MotionBricks folders
+      # ---------------------------------------------------------
+      - name: Create MotionBricks project files
+        shell: bash
         run: |
-          echo "Android SDK: $ANDROID_SDK_ROOT"
-          echo "Android NDK: $ANDROID_NDK_HOME"
-          test -d "$ANDROID_NDK_HOME"
-          ls -la "$ANDROID_NDK_HOME"
+          set -e
 
-      - name: Check MotionBricks source
+          mkdir -p native/motion_bricks
+          mkdir -p addons/motion_bricks
+          mkdir -p addons/motion_bricks/bin/android.release.arm64
+          mkdir -p motion_bricks/models
+          mkdir -p motion_bricks/styles
+
+          touch motion_bricks/models/.gdignore
+          touch motion_bricks/styles/.gdignore
+
+
+      # ---------------------------------------------------------
+      # 6. Create CMakeLists.txt
+      # ---------------------------------------------------------
+      - name: Create MotionBricks CMakeLists
+        shell: bash
         run: |
-          if [ ! -f "native/motion_bricks/CMakeLists.txt" ]; then
-            echo "ERROR: native/motion_bricks/CMakeLists.txt is missing."
-            echo "The MotionBricks native source files must exist in the repository."
-            exit 1
-          fi
+          cat > native/motion_bricks/CMakeLists.txt <<'EOF'
+          cmake_minimum_required(VERSION 3.25)
 
-          if [ ! -f "native/motion_bricks/motion_bricks_native.cpp" ]; then
-            echo "ERROR: motion_bricks_native.cpp is missing."
-            exit 1
-          fi
+          project(motion_bricks_godot LANGUAGES C CXX)
 
-          echo "MotionBricks source found."
+          set(CMAKE_CXX_STANDARD 23)
+          set(CMAKE_CXX_STANDARD_REQUIRED ON)
+          set(CMAKE_CXX_EXTENSIONS OFF)
 
-      - name: Configure MotionBricks native library
+          include(FetchContent)
+
+          FetchContent_Declare(
+            godot_cpp
+            GIT_REPOSITORY https://github.com/godotengine/godot-cpp.git
+            GIT_TAG 10.0.0-stable
+          )
+
+          set(GODOTCPP_API_VERSION "4.7" CACHE STRING "" FORCE)
+
+          FetchContent_MakeAvailable(godot_cpp)
+
+
+          FetchContent_Declare(
+            motion_bricks
+            GIT_REPOSITORY https://github.com/localai-org/motion-bricks.cpp.git
+            GIT_TAG a0732b642c0333077e127a2f56ab0014c196bca4
+            GIT_SUBMODULES ggml
+            GIT_SHALLOW FALSE
+          )
+
+
+          set(MOTIONBRICKS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+          set(MOTIONBRICKS_ENABLE_GGML ON CACHE BOOL "" FORCE)
+          set(MOTIONBRICKS_ENABLE_LLAMAFILE OFF CACHE BOOL "" FORCE)
+          set(MOTIONBRICKS_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
+          set(MOTIONBRICKS_ENABLE_VULKAN OFF CACHE BOOL "" FORCE)
+          set(MOTIONBRICKS_ENABLE_PHYSICS OFF CACHE BOOL "" FORCE)
+          set(MOTIONBRICKS_DOWNLOAD_MODELS OFF CACHE BOOL "" FORCE)
+
+
+          FetchContent_MakeAvailable(motion_bricks)
+
+
+          add_library(
+            motion_bricks_godot
+            SHARED
+            motion_bricks_native.cpp
+          )
+
+
+          target_include_directories(
+            motion_bricks_godot
+            PRIVATE
+            ${godot_cpp_SOURCE_DIR}/include
+            ${godot_cpp_BINARY_DIR}/gen/include
+            ${motion_bricks_SOURCE_DIR}/include
+          )
+
+
+          target_link_libraries(
+            motion_bricks_godot
+            PRIVATE
+            godot-cpp
+            motionbricks_static
+          )
+
+
+          target_compile_definitions(
+            motion_bricks_godot
+            PRIVATE
+            MOTIONBRICKS_SHARED
+          )
+
+
+          set_target_properties(
+            motion_bricks_godot
+            PROPERTIES
+            PREFIX "lib"
+            OUTPUT_NAME "motion_bricks_godot"
+          )
+          EOF
+
+
+      # ---------------------------------------------------------
+      # 7. Create native C++ GDExtension bridge
+      # ---------------------------------------------------------
+      - name: Create MotionBricks native bridge
+        shell: bash
+        run: |
+          cat > native/motion_bricks/motion_bricks_native.cpp <<'EOF'
+          #include <godot_cpp/classes/object.hpp>
+          #include <godot_cpp/classes/skeleton3d.hpp>
+          #include <godot_cpp/variant/utility_functions.hpp>
+          #include <godot_cpp/variant/packed_float32_array.hpp>
+          #include <godot_cpp/variant/dictionary.hpp>
+          #include <godot_cpp/variant/vector3.hpp>
+          #include <godot_cpp/variant/string.hpp>
+          #include <godot_cpp/core/class_db.hpp>
+          #include <godot_cpp/godot.hpp>
+
+          #include <motionbricks/motionbricks.h>
+
+          using namespace godot;
+
+
+          class MotionBricksNative : public Object {
+              GDCLASS(MotionBricksNative, Object)
+
+              mb_runtime_options *options = nullptr;
+              mb_model *model = nullptr;
+              mb_style *style = nullptr;
+              mb_agent *agent = nullptr;
+              mb_command *command = nullptr;
+              mb_motion *pending_motion = nullptr;
+
+              bool configured = false;
+
+              uint64_t seed = 1;
+
+              String active_style;
+
+              int current_frame = 0;
+              int frame_count = 0;
+
+
+              static void _bind_methods() {
+                  ClassDB::bind_method(
+                      D_METHOD("configure", "model_path", "style_path", "threads"),
+                      &MotionBricksNative::configure
+                  );
+
+                  ClassDB::bind_method(
+                      D_METHOD("reset"),
+                      &MotionBricksNative::reset
+                  );
+
+                  ClassDB::bind_method(
+                      D_METHOD("plan", "move", "facing", "style"),
+                      &MotionBricksNative::plan
+                  );
+
+                  ClassDB::bind_method(
+                      D_METHOD("sample", "frame_index"),
+                      &MotionBricksNative::sample
+                  );
+
+                  ClassDB::bind_method(
+                      D_METHOD("is_configured"),
+                      &MotionBricksNative::is_configured
+                  );
+
+                  ClassDB::bind_method(
+                      D_METHOD("joint_count"),
+                      &MotionBricksNative::joint_count
+                  );
+
+                  ClassDB::bind_method(
+                      D_METHOD("advance", "frames"),
+                      &MotionBricksNative::advance
+                  );
+              }
+
+
+              void cleanup() {
+                  if (pending_motion) {
+                      mb_motion_free(pending_motion);
+                      pending_motion = nullptr;
+                  }
+
+                  if (agent) {
+                      mb_agent_free(agent);
+                      agent = nullptr;
+                  }
+
+                  if (style) {
+                      mb_style_free(style);
+                      style = nullptr;
+                  }
+
+                  if (command) {
+                      mb_command_free(command);
+                      command = nullptr;
+                  }
+
+                  if (model) {
+                      mb_model_free(model);
+                      model = nullptr;
+                  }
+
+                  if (options) {
+                      mb_runtime_options_free(options);
+                      options = nullptr;
+                  }
+
+                  configured = false;
+              }
+
+
+              bool ok(
+                  mb_status status,
+                  const char *where
+              ) {
+                  if (status == MB_OK) {
+                      return true;
+                  }
+
+                  UtilityFunctions::printerr(
+                      String("MotionBricks: ") +
+                      where +
+                      ": " +
+                      String(mb_status_string(status))
+                  );
+
+                  return false;
+              }
+
+
+          public:
+
+              ~MotionBricksNative() {
+                  cleanup();
+              }
+
+
+              bool configure(
+                  String model_path,
+                  String style_path,
+                  int threads
+              ) {
+                  cleanup();
+
+                  char err[1024] = {};
+
+
+                  if (!ok(
+                      mb_runtime_options_create(
+                          &options,
+                          err,
+                          sizeof(err)
+                      ),
+                      "runtime_options_create"
+                  )) {
+                      return false;
+                  }
+
+
+                  if (!ok(
+                      mb_runtime_options_set_device(
+                          options,
+                          MB_DEVICE_CPU,
+                          err,
+                          sizeof(err)
+                      ),
+                      "set_device"
+                  )) {
+                      return false;
+                  }
+
+
+                  if (!ok(
+                      mb_runtime_options_set_threads(
+                          options,
+                          (uint32_t)MAX(1, threads),
+                          err,
+                          sizeof(err)
+                      ),
+                      "set_threads"
+                  )) {
+                      return false;
+                  }
+
+
+                  if (!ok(
+                      mb_model_load(
+                          model_path.utf8().get_data(),
+                          options,
+                          &model,
+                          err,
+                          sizeof(err)
+                      ),
+                      "model_load"
+                  )) {
+                      return false;
+                  }
+
+
+                  if (!ok(
+                      mb_command_create(
+                          &command,
+                          err,
+                          sizeof(err)
+                      ),
+                      "command_create"
+                  )) {
+                      return false;
+                  }
+
+
+                  if (!ok(
+                      mb_style_load(
+                          model,
+                          style_path.utf8().get_data(),
+                          &style,
+                          err,
+                          sizeof(err)
+                      ),
+                      "style_load"
+                  )) {
+                      return false;
+                  }
+
+
+                  if (!ok(
+                      mb_agent_create(
+                          model,
+                          &agent,
+                          err,
+                          sizeof(err)
+                      ),
+                      "agent_create"
+                  )) {
+                      return false;
+                  }
+
+
+                  if (!ok(
+                      mb_agent_reset(
+                          agent,
+                          style,
+                          err,
+                          sizeof(err)
+                      ),
+                      "agent_reset"
+                  )) {
+                      return false;
+                  }
+
+
+                  mb_command_set_seed(
+                      command,
+                      seed,
+                      err,
+                      sizeof(err)
+                  );
+
+
+                  current_frame = 0;
+                  frame_count = 0;
+
+                  active_style = style_path;
+
+                  configured = true;
+
+                  return true;
+              }
+
+
+              bool is_configured() const {
+                  return configured;
+              }
+
+
+              int joint_count() const {
+                  if (!model) {
+                      return 0;
+                  }
+
+                  char err[256] = {};
+
+                  uint32_t n = 0;
+
+                  if (
+                      mb_model_get_joint_count(
+                          model,
+                          &n,
+                          err,
+                          sizeof(err)
+                      ) != MB_OK
+                  ) {
+                      return 0;
+                  }
+
+                  return (int)n;
+              }
+
+
+              void reset() {
+                  if (!configured) {
+                      return;
+                  }
+
+                  char err[256] = {};
+
+                  mb_agent_reset(
+                      agent,
+                      style,
+                      err,
+                      sizeof(err)
+                  );
+              }
+
+
+              bool plan(
+                  Vector3 move,
+                  Vector3 facing,
+                  String style_name
+              ) {
+                  if (!configured) {
+                      return false;
+                  }
+
+                  char err[1024] = {};
+
+
+                  if (style_name != active_style) {
+                      mb_style *new_style = nullptr;
+
+                      if (
+                          mb_style_load(
+                              model,
+                              style_name.utf8().get_data(),
+                              &new_style,
+                              err,
+                              sizeof(err)
+                          ) == MB_OK
+                      ) {
+                          mb_style_free(style);
+
+                          style = new_style;
+
+                          active_style = style_name;
+
+                          mb_agent_reset(
+                              agent,
+                              style,
+                              err,
+                              sizeof(err)
+                          );
+                      }
+                  }
+
+
+                  if (!ok(
+                      mb_command_set_movement_direction(
+                          command,
+                          move.x,
+                          move.y,
+                          move.z,
+                          err,
+                          sizeof(err)
+                      ),
+                      "movement"
+                  )) {
+                      return false;
+                  }
+
+
+                  if (!ok(
+                      mb_command_set_facing_direction(
+                          command,
+                          facing.x,
+                          facing.y,
+                          facing.z,
+                          err,
+                          sizeof(err)
+                      ),
+                      "facing"
+                  )) {
+                      return false;
+                  }
+
+
+                  mb_command_set_seed(
+                      command,
+                      seed++,
+                      err,
+                      sizeof(err)
+                  );
+
+
+                  if (pending_motion) {
+                      mb_motion_free(pending_motion);
+                      pending_motion = nullptr;
+                  }
+
+
+                  if (!ok(
+                      mb_agent_plan(
+                          agent,
+                          command,
+                          &pending_motion,
+                          err,
+                          sizeof(err)
+                      ),
+                      "plan"
+                  )) {
+                      return false;
+                  }
+
+
+                  current_frame = 0;
+
+
+                  uint64_t frames = 0;
+
+                  if (pending_motion) {
+                      mb_motion_get_frame_count(
+                          pending_motion,
+                          &frames,
+                          err,
+                          sizeof(err)
+                      );
+                  }
+
+
+                  frame_count = (int)frames;
+
+                  return pending_motion != nullptr;
+              }
+
+
+              Dictionary sample(
+                  int frame_index
+              ) {
+                  Dictionary out;
+
+                  if (
+                      !configured ||
+                      !pending_motion
+                  ) {
+                      return out;
+                  }
+
+
+                  char err[1024] = {};
+
+
+                  uint64_t frames = 0;
+                  uint64_t joints = 0;
+                  uint64_t count = 0;
+
+
+                  const float *roots = nullptr;
+                  const float *rots = nullptr;
+
+
+                  mb_motion_get_frame_count(
+                      pending_motion,
+                      &frames,
+                      err,
+                      sizeof(err)
+                  );
+
+
+                  mb_motion_get_joint_count(
+                      pending_motion,
+                      &joints,
+                      err,
+                      sizeof(err)
+                  );
+
+
+                  mb_motion_get_root_translations(
+                      pending_motion,
+                      &roots,
+                      &count,
+                      err,
+                      sizeof(err)
+                  );
+
+
+                  mb_motion_get_local_rotations_xyzw(
+                      pending_motion,
+                      &rots,
+                      &count,
+                      err,
+                      sizeof(err)
+                  );
+
+
+                  if (
+                      frames == 0 ||
+                      joints == 0 ||
+                      !rots
+                  ) {
+                      return out;
+                  }
+
+
+                  int f = CLAMP(
+                      frame_index,
+                      0,
+                      (int)frames - 1
+                  );
+
+
+                  Vector3 root(
+                      roots ? roots[f * 3 + 0] : 0.0f,
+                      roots ? roots[f * 3 + 1] : 0.0f,
+                      roots ? roots[f * 3 + 2] : 0.0f
+                  );
+
+
+                  PackedFloat32Array rotations;
+
+                  rotations.resize(
+                      (int)joints * 4
+                  );
+
+
+                  for (
+                      uint64_t j = 0;
+                      j < joints * 4;
+                      ++j
+                  ) {
+                      rotations[(int)j] =
+                          rots[f * joints * 4 + j];
+                  }
+
+
+                  out["root"] = root;
+                  out["rotations"] = rotations;
+                  out["frames"] = (int)frames;
+                  out["joints"] = (int)joints;
+                  out["frame"] = f;
+
+
+                  return out;
+              }
+
+
+              void advance(
+                  int frames
+              ) {
+                  if (
+                      !configured ||
+                      !agent ||
+                      frames <= 0
+                  ) {
+                      return;
+                  }
+
+                  char err[256] = {};
+
+
+                  if (
+                      mb_agent_advance(
+                          agent,
+                          (uint32_t)frames,
+                          err,
+                          sizeof(err)
+                      ) != MB_OK
+                  ) {
+                      return;
+                  }
+
+
+                  current_frame += frames;
+
+
+                  if (
+                      pending_motion &&
+                      current_frame >= frame_count
+                  ) {
+                      mb_motion_free(
+                          pending_motion
+                      );
+
+                      pending_motion = nullptr;
+
+                      frame_count = 0;
+
+                      current_frame = 0;
+                  }
+              }
+          };
+
+
+          void initialize_motion_bricks(
+              ModuleInitializationLevel level
+          ) {
+              if (
+                  level ==
+                  MODULE_INITIALIZATION_LEVEL_SCENE
+              ) {
+                  ClassDB::register_class<MotionBricksNative>();
+              }
+          }
+
+
+          void uninitialize_motion_bricks(
+              ModuleInitializationLevel level
+          ) {
+          }
+
+
+          extern "C" {
+
+          GDExtensionBool GDE_EXPORT
+          motion_bricks_godot_library_init(
+              GDExtensionInterfaceGetProcAddress get_proc_address,
+              GDExtensionClassLibraryPtr library,
+              GDExtensionInitialization *initialization
+          ) {
+
+              GDExtensionBinding::InitObject init_obj(
+                  get_proc_address,
+                  library,
+                  initialization
+              );
+
+
+              init_obj.register_initializer(
+                  initialize_motion_bricks
+              );
+
+
+              init_obj.register_terminator(
+                  uninitialize_motion_bricks
+              );
+
+
+              init_obj.set_minimum_library_initialization_level(
+                  MODULE_INITIALIZATION_LEVEL_SCENE
+              );
+
+
+              return init_obj.init();
+          }
+
+          }
+          EOF
+
+
+      # ---------------------------------------------------------
+      # 8. Create GDExtension file
+      # ---------------------------------------------------------
+      - name: Create Godot GDExtension
+        shell: bash
+        run: |
+          cat > addons/motion_bricks/motion_bricks.gdextension <<'EOF'
+          [configuration]
+
+          entry_symbol = "motion_bricks_godot_library_init"
+          compatibility_minimum = "4.7"
+
+
+          [libraries]
+
+          android.debug.arm64 = "res://addons/motion_bricks/bin/android.debug.arm64/libmotion_bricks_godot.so"
+
+          android.release.arm64 = "res://addons/motion_bricks/bin/android.release.arm64/libmotion_bricks_godot.so"
+
+          linux.debug.x86_64 = "res://addons/motion_bricks/bin/linux.debug.x86_64/libmotion_bricks_godot.so"
+
+          linux.release.x86_64 = "res://addons/motion_bricks/bin/linux.release.x86_64/libmotion_bricks_godot.so"
+          EOF
+
+
+      # ---------------------------------------------------------
+      # 9. Create Godot adapter
+      # ---------------------------------------------------------
+      - name: Create MotionBricks Godot adapter
+        shell: bash
+        run: |
+          cat > addons/motion_bricks/motion_bricks_adapter.gd <<'EOF'
+          class_name MotionBricksAdapter
+          extends Node
+
+          ## Runtime bridge for MotionBricks.
+          ## Existing animations remain available as fallback.
+
+          @export var enabled := true
+
+          @export var model_path := \
+              "res://motion_bricks/generated/g1-f32"
+
+          @export var style_paths := {
+              "Idle":
+                  "res://motion_bricks/generated/styles/idle.mbstyle",
+
+              "Walk":
+                  "res://motion_bricks/generated/styles/walk.mbstyle",
+
+              "Run":
+                  "res://motion_bricks/generated/styles/walk.mbstyle"
+          }
+
+          @export var cpu_threads := 2
+
+          @export var update_interval := 0.12
+
+
+          var native: Object
+          var available := false
+          var configured := false
+
+          var _timer := 0.0
+
+          var _last_move := Vector3.ZERO
+          var _last_facing := Vector3.FORWARD
+
+          var _skeleton: Skeleton3D
+
+          var _bone := {}
+
+          var _frame := 0
+
+
+          const G1_NAMES := [
+              "left_hip_pitch_joint",
+              "left_hip_roll_joint",
+              "left_hip_yaw_joint",
+              "left_knee_joint",
+              "left_ankle_pitch_joint",
+              "left_ankle_roll_joint",
+
+              "right_hip_pitch_joint",
+              "right_hip_roll_joint",
+              "right_hip_yaw_joint",
+              "right_knee_joint",
+              "right_ankle_pitch_joint",
+              "right_ankle_roll_joint",
+
+              "waist_yaw_joint",
+              "waist_roll_joint",
+              "waist_pitch_joint",
+
+              "left_shoulder_pitch_joint",
+              "left_shoulder_roll_joint",
+              "left_shoulder_yaw_joint",
+              "left_elbow_joint",
+              "left_wrist_roll_joint",
+              "left_wrist_pitch_joint",
+              "left_wrist_yaw_joint",
+
+              "right_shoulder_pitch_joint",
+              "right_shoulder_roll_joint",
+              "right_shoulder_yaw_joint",
+              "right_elbow_joint",
+              "right_wrist_roll_joint",
+              "right_wrist_pitch_joint",
+              "right_wrist_yaw_joint"
+          ]
+
+
+          func _ready() -> void:
+
+              _skeleton = get_parent().find_child(
+                  "Skeleton3D",
+                  true,
+                  false
+              ) as Skeleton3D
+
+
+              if _skeleton:
+
+                  for i in _skeleton.get_bone_count():
+
+                      _bone[
+                          _skeleton
+                              .get_bone_name(i)
+                              .to_lower()
+                      ] = i
+
+
+              if (
+                  enabled and
+                  ClassDB.class_exists(
+                      "MotionBricksNative"
+                  )
+              ):
+
+                  native = ClassDB.instantiate(
+                      "MotionBricksNative"
+                  )
+
+
+                  if native:
+
+                      configured = bool(
+                          native.configure(
+                              ProjectSettings
+                                  .globalize_path(
+                                      model_path
+                                  ),
+
+                              ProjectSettings
+                                  .globalize_path(
+                                      str(
+                                          style_paths.get(
+                                              "Idle",
+                                              ""
+                                          )
+                                      )
+                                  ),
+
+                              cpu_threads
+                          )
+                      )
+
+
+                      available = configured
+
+
+              if available:
+
+                  print(
+                      "[MotionBricks] native runtime loaded"
+                  )
+
+              else:
+
+                  print(
+                      "[MotionBricks] runtime/model not available; using existing animations"
+                  )
+
+
+          func request_motion(
+              move: Vector3,
+              facing: Vector3,
+              style: String = "Walk"
+          ) -> bool:
+
+              if (
+                  not available or
+                  native == null
+              ):
+                  return false
+
+
+              var path: String = str(
+                  style_paths.get(
+                      style,
+                      ""
+                  )
+              )
+
+
+              if path.is_empty():
+
+                  path = str(
+                      style_paths.get(
+                          "Walk",
+                          ""
+                      )
+                  )
+
+
+              _last_move = move
+              _last_facing = facing
+
+
+              return bool(
+                  native.plan(
+                      move,
+                      facing,
+                      ProjectSettings.globalize_path(
+                          path
+                      )
+                  )
+              )
+
+
+          func _physics_process(
+              delta: float
+          ) -> void:
+
+              if (
+                  not available or
+                  native == null or
+                  _skeleton == null
+              ):
+                  return
+
+
+              _timer -= delta
+
+
+              if _timer > 0.0:
+                  return
+
+
+              _timer = update_interval
+
+
+              var pose: Dictionary = native.sample(
+                  _frame
+              )
+
+
+              if pose.is_empty():
+                  return
+
+
+              _apply_g1_pose(
+                  pose
+              )
+
+
+              _frame += 1
+
+
+              if (
+                  _frame >= int(
+                      pose.get(
+                          "frames",
+                          1
+                      )
+                  )
+              ):
+
+                  native.advance(
+                      _frame
+                  )
+
+                  _frame = 0
+
+
+          func _q(
+              a: PackedFloat32Array,
+              i: int
+          ) -> Quaternion:
+
+              return Quaternion(
+                  a[i],
+                  a[i + 1],
+                  a[i + 2],
+                  a[i + 3]
+              ).normalized()
+
+
+          func _set_rot(
+              name: String,
+              q: Quaternion
+          ) -> void:
+
+              var idx: int = int(
+                  _bone.get(
+                      name.to_lower(),
+                      -1
+                  )
+              )
+
+
+              if idx >= 0:
+
+                  _skeleton.set_bone_pose_rotation(
+                      idx,
+                      q
+                  )
+
+
+          func _apply_g1_pose(
+              pose: Dictionary
+          ) -> void:
+
+              var r: PackedFloat32Array = pose.get(
+                  "rotations",
+                  PackedFloat32Array()
+              )
+
+
+              if r.size() < 29 * 4:
+                  return
+
+
+              var lhip := \
+                  _q(r, 0) * \
+                  _q(r, 4) * \
+                  _q(r, 8)
+
+              var lknee := \
+                  _q(r, 12)
+
+              var lfoot := \
+                  _q(r, 16) * \
+                  _q(r, 20)
+
+
+              var rhip := \
+                  _q(r, 24) * \
+                  _q(r, 28) * \
+                  _q(r, 32)
+
+              var rknee := \
+                  _q(r, 36)
+
+              var rfoot := \
+                  _q(r, 40) * \
+                  _q(r, 44)
+
+
+              var waist := \
+                  _q(r, 48) * \
+                  _q(r, 52) * \
+                  _q(r, 56)
+
+
+              var lshoulder := \
+                  _q(r, 60) * \
+                  _q(r, 64) * \
+                  _q(r, 68)
+
+              var lelbow := \
+                  _q(r, 72)
+
+              var lwrist := \
+                  _q(r, 76) * \
+                  _q(r, 80) * \
+                  _q(r, 84)
+
+
+              var rshoulder := \
+                  _q(r, 88) * \
+                  _q(r, 92) * \
+                  _q(r, 96)
+
+              var relbow := \
+                  _q(r, 100)
+
+              var rwrist := \
+                  _q(r, 104) * \
+                  _q(r, 108) * \
+                  _q(r, 112)
+
+
+              _set_rot(
+                  "UpperLeg_L",
+                  lhip
+              )
+
+              _set_rot(
+                  "LowerLeg_L",
+                  lknee
+              )
+
+              _set_rot(
+                  "Foot_L",
+                  lfoot
+              )
+
+
+              _set_rot(
+                  "UpperLeg_R",
+                  rhip
+              )
+
+              _set_rot(
+                  "LowerLeg_R",
+                  rknee
+              )
+
+              _set_rot(
+                  "Foot_R",
+                  rfoot
+              )
+
+
+              _set_rot(
+                  "Spine",
+                  waist
+              )
+
+
+              _set_rot(
+                  "Shoulder_L",
+                  lshoulder
+              )
+
+              _set_rot(
+                  "LowerArm_L",
+                  lelbow
+              )
+
+              _set_rot(
+                  "Hand_L",
+                  lwrist
+              )
+
+
+              _set_rot(
+                  "Shoulder_R",
+                  rshoulder
+              )
+
+              _set_rot(
+                  "LowerArm_R",
+                  relbow
+              )
+
+              _set_rot(
+                  "Hand_R",
+                  rwrist
+              )
+
+
+          func reset_motion() -> void:
+
+              if (
+                  native and
+                  native.has_method("reset")
+              ):
+
+                  native.reset()
+          EOF
+
+
+      # ---------------------------------------------------------
+      # 10. Create documentation
+      # ---------------------------------------------------------
+      - name: Create MotionBricks documentation
+        shell: bash
+        run: |
+          cat > motion_bricks/README.md <<'EOF'
+          # MotionBricks runtime
+
+          This directory contains the runtime location for the official
+          MotionBricks model bundle.
+
+          The GitHub Actions workflow downloads the official G1 F32 model
+          bundle and places it under:
+
+          motion_bricks/generated/
+
+          The Android native library is built for:
+
+          arm64-v8a
+
+          Existing player animations remain available as fallback.
+          EOF
+
+
+          cat > MOTIONBRICKS_ANDROID_BUILD.md <<'EOF'
+          # MotionBricks Android ARM64
+
+          The workflow builds the MotionBricks GDExtension for Android ARM64.
+
+          It also downloads the official MotionBricks G1 F32 runtime model.
+
+          Final artifact:
+
+          MotionBricks-Android-ARM64-runtime
+          EOF
+
+
+      # ---------------------------------------------------------
+      # 11. Verify generated source files
+      # ---------------------------------------------------------
+      - name: Verify MotionBricks source
+        run: |
+          echo "=== MotionBricks files ==="
+
+          find native/motion_bricks \
+            -maxdepth 2 \
+            -type f \
+            -print
+
+          echo ""
+
+          find addons/motion_bricks \
+            -maxdepth 2 \
+            -type f \
+            -print
+
+          echo ""
+
+          test -f native/motion_bricks/CMakeLists.txt
+          test -f native/motion_bricks/motion_bricks_native.cpp
+          test -f addons/motion_bricks/motion_bricks.gdextension
+          test -f addons/motion_bricks/motion_bricks_adapter.gd
+
+          echo ""
+          echo "MotionBricks source files created successfully."
+
+
+      # ---------------------------------------------------------
+      # 12. Configure native build
+      # ---------------------------------------------------------
+      - name: Configure MotionBricks
         working-directory: native/motion_bricks
         run: |
           cmake -S . \
@@ -74,100 +1372,23 @@ jobs:
             -DCMAKE_ANDROID_NDK="$ANDROID_NDK_HOME" \
             -DGODOTCPP_API_VERSION=4.7 \
             -DMOTIONBRICKS_BUILD_TESTS=OFF \
+            -DMOTIONBRICKS_ENABLE_GGML=ON \
+            -DMOTIONBRICKS_ENABLE_LLAMAFILE=OFF \
+            -DMOTIONBRICKS_CPU_ALL_VARIANTS=OFF \
             -DMOTIONBRICKS_ENABLE_VULKAN=OFF \
             -DMOTIONBRICKS_ENABLE_PHYSICS=OFF \
             -DMOTIONBRICKS_DOWNLOAD_MODELS=OFF
 
+
+      # ---------------------------------------------------------
+      # 13. Build native library
+      # ---------------------------------------------------------
       - name: Build MotionBricks GDExtension
         run: |
-          cmake --build build/android-arm64 \
+          cmake --build \
+            build/android-arm64 \
             --target motion_bricks_godot \
             -j2
 
-      - name: Find Android library
-        run: |
-          echo "Searching for MotionBricks Android library..."
 
-          find build/android-arm64 \
-            -type f \
-            -name "libmotion_bricks_godot.so" \
-            -print
-
-          LIB=$(find build/android-arm64 \
-            -type f \
-            -name "libmotion_bricks_godot.so" \
-            | head -n 1)
-
-          if [ -z "$LIB" ]; then
-            echo "ERROR: libmotion_bricks_godot.so was not produced."
-            exit 1
-          fi
-
-          echo "Found library:"
-          ls -lh "$LIB"
-
-      - name: Download official MotionBricks model
-        run: |
-          git clone --depth 1 \
-            https://github.com/localai-org/motion-bricks.cpp.git \
-            /tmp/motion-bricks.cpp
-
-          python3 \
-            /tmp/motion-bricks.cpp/scripts/download_gguf_weights.py \
-            --output motion_bricks/generated
-
-      - name: Install Android GDExtension
-        run: |
-          mkdir -p addons/motion_bricks/bin/android.release.arm64
-
-          LIB=$(find build/android-arm64 \
-            -type f \
-            -name "libmotion_bricks_godot.so" \
-            | head -n 1)
-
-          if [ -z "$LIB" ]; then
-            echo "ERROR: MotionBricks library not found."
-            exit 1
-          fi
-
-          cp "$LIB" \
-            addons/motion_bricks/bin/android.release.arm64/
-
-          echo "Installed library:"
-          ls -lh addons/motion_bricks/bin/android.release.arm64/
-
-      - name: Verify MotionBricks runtime files
-        run: |
-          echo "=== Native library ==="
-          find addons/motion_bricks/bin \
-            -type f \
-            -maxdepth 3 \
-            -print
-
-          echo ""
-          echo "=== Model files ==="
-          find motion_bricks/generated \
-            -type f \
-            -maxdepth 4 \
-            -print | head -100
-
-      - name: Package MotionBricks Android ARM64 runtime
-        run: |
-          mkdir -p dist
-
-          zip -r \
-            dist/MotionBricks-Android-ARM64-runtime.zip \
-            addons/motion_bricks/bin/android.release.arm64 \
-            motion_bricks/generated
-
-          echo ""
-          echo "=== Final artifact ==="
-          ls -lh dist/
-
-      - name: Upload Android runtime
-        uses: actions/upload-artifact@v4
-        with:
-          name: MotionBricks-Android-ARM64-runtime
-          path: dist/MotionBricks-Android-ARM64-runtime.zip
-          if-no-files-found: error
-          retention-days: 14
+      #

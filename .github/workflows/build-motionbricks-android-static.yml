@@ -1,0 +1,149 @@
+name: Build MotionBricks Android ARM64 STATIC
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK and build tools
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+          sdkmanager "ndk;27.3.13750724"
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build git python3 unzip zip binutils
+
+      - name: Clone Godot CPP
+        run: |
+          git clone --depth 1 --branch 10.0.0-stable https://github.com/godotengine/godot-cpp.git /tmp/godot-cpp
+
+      - name: Clone MotionBricks and GGML
+        run: |
+          git clone --depth 1 https://github.com/localai-org/motion-bricks.cpp.git /tmp/motion-bricks.cpp
+          rm -rf /tmp/motion-bricks.cpp/ggml
+          git clone --depth 1 https://github.com/ggml-org/ggml.git /tmp/motion-bricks.cpp/ggml
+
+      - name: Extract bridge and CMake from existing workflow
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          src = Path('.github/workflows/build-motionbricks-android.yml').read_text()
+
+          cpp_match = re.search(
+              r"cat > /tmp/motion-bricks-godot/motion_bricks_native\.cpp <<'CPP'\n(.*?)\n\s*CPP",
+              src, re.S
+          )
+          cmake_match = re.search(
+              r"cat > /tmp/motion-bricks-godot/CMakeLists\.txt <<'CMAKE'\n(.*?)\n\s*CMAKE",
+              src, re.S
+          )
+
+          if not cpp_match or not cmake_match:
+              raise SystemExit("Could not extract bridge/CMake from existing workflow")
+
+          def unindent(text):
+              lines = text.splitlines()
+              return "\n".join(
+                  line[10:] if line.startswith("          ") else line
+                  for line in lines
+              ) + "\n"
+
+          out = Path("/tmp/motion-bricks-godot")
+          out.mkdir(parents=True, exist_ok=True)
+          (out / "motion_bricks_native.cpp").write_text(unindent(cpp_match.group(1)))
+          (out / "CMakeLists.txt").write_text(unindent(cmake_match.group(1)))
+          PY
+
+      - name: Configure STATIC GGML Android ARM64
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_NDK_ROOT"
+          cmake \
+            -S /tmp/motion-bricks-godot \
+            -B /tmp/motion-bricks-godot/build \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-35 \
+            -DANDROID_STL=c++_shared \
+            -DGODOTCPP_API_VERSION=4.7 \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_STATIC=ON \
+            -DGGML_BACKEND_DL=OFF \
+            -DGGML_NATIVE=OFF \
+            -DGGML_OPENMP=OFF \
+            -DGGML_CCACHE=OFF \
+            -DGGML_VULKAN=OFF \
+            -DMOTIONBRICKS_CPU_ALL_VARIANTS=OFF
+
+      - name: Build STATIC MotionBricks
+        run: |
+          cmake --build /tmp/motion-bricks-godot/build --config Release --parallel 2
+
+      - name: Verify no dynamic GGML dependency
+        run: |
+          LIB=/tmp/motion-bricks-godot/build/libmotion_bricks_godot.so
+          test -f "$LIB"
+          echo "=== NEEDED libraries ==="
+          readelf -d "$LIB" | grep NEEDED || true
+          if readelf -d "$LIB" | grep -E 'libggml|libmotionbricks'; then
+            echo "ERROR: dynamic GGML/MotionBricks dependency found"
+            exit 1
+          fi
+          echo "STATIC GGML CHECK: PASS"
+
+      - name: Package Android ARM64 library
+        run: |
+          mkdir -p /tmp/runtime/addons/motion_bricks/bin/android.release.arm64
+          cp /tmp/motion-bricks-godot/build/libmotion_bricks_godot.so \
+             /tmp/runtime/addons/motion_bricks/bin/android.release.arm64/
+
+          cat > /tmp/runtime/addons/motion_bricks/motion_bricks.gdextension <<'GDEX'
+          [configuration]
+          entry_symbol = "motion_bricks_godot_library_init"
+          compatibility_minimum = "4.7"
+
+          [libraries]
+          android.release.arm64 = "res://addons/motion_bricks/bin/android.release.arm64/libmotion_bricks_godot.so"
+          GDEX
+
+          printf '%s\n' \
+            'MotionBricks Android ARM64 STATIC' \
+            'ABI=arm64-v8a' \
+            'ANDROID_PLATFORM=35' \
+            'GGML_STATIC=ON' \
+            'GGML_BACKEND_DL=OFF' \
+            'MOTIONBRICKS_CPU_ALL_VARIANTS=OFF' \
+            > /tmp/runtime/BUILD_INFO.txt
+
+          cd /tmp/runtime
+          zip -r "$GITHUB_WORKSPACE/MotionBricks-Android-ARM64-STATIC.zip" .
+
+      - name: Upload static runtime
+        uses: actions/upload-artifact@v4
+        with:
+          name: MotionBricks-Android-ARM64-STATIC
+          path: MotionBricks-Android-ARM64-STATIC.zip
+          if-no-files-found: error

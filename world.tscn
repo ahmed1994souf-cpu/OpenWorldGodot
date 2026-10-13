@@ -1,0 +1,78 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/world.gd" id="1_rwgxs"]
+[ext_resource type="PackedScene" path="res://assets/models/world.glb" id="2_4wyf3"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_k0juu"]
+sky_top_color = Color(0.12, 0.20, 0.30, 1)
+sky_horizon_color = Color(0.62, 0.50, 0.40, 1)
+ground_bottom_color = Color(0.10, 0.14, 0.13, 1)
+ground_horizon_color = Color(0.38, 0.34, 0.29, 1)
+sun_angle_max = 12.0
+
+[sub_resource type="Sky" id="Sky_71j4m"]
+sky_material = SubResource("ProceduralSkyMaterial_k0juu")
+
+[sub_resource type="Environment" id="Environment_qfnet"]
+background_mode = 2
+sky = SubResource("Sky_71j4m")
+ambient_light_source = 3
+ambient_light_energy = 0.58
+tonemap_mode = 2
+tonemap_exposure = 1.0
+glow_enabled = true
+glow_intensity = 0.42
+glow_strength = 0.78
+glow_bloom = 0.055
+glow_hdr_threshold = 1.05
+fog_enabled = true
+fog_light_color = Color(0.44, 0.50, 0.54, 1)
+fog_density = 0.0065
+fog_sky_affect = 0.18
+fog_aerial_perspective = 0.62
+fog_height = 1.2
+fog_height_density = 0.035
+adjustment_enabled = true
+adjustment_brightness = 1.04
+adjustment_contrast = 1.18
+adjustment_saturation = 0.88
+
+[node name="World" type="Node3D" unique_id=1900028689]
+script = ExtResource("1_rwgxs")
+
+[node name="Level" type="Node3D" parent="." unique_id=1265879274 instance=ExtResource("2_4wyf3")]
+scale = Vector3(1.25, 1.25, 1.25)
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="." unique_id=1696313416]
+environment = SubResource("Environment_qfnet")
+
+[node name="Sun" type="DirectionalLight3D" parent="." unique_id=1985512244]
+transform = Transform3D(0.81915206, 0.43938506, -0.36868784, 0, 0.64278764, 0.76604444, 0.57357645, -0.62750685, 0.5265408, 0, 0, 0)
+light_color = Color(1, 0.82, 0.68, 1)
+light_energy = 1.05
+shadow_enabled = true
+shadow_bias = 0.06
+shadow_normal_bias = 1.2
+directional_shadow_mode = 1
+directional_shadow_max_distance = 65.0
+
+[node name="ThreatLight_Left" type="OmniLight3D" parent="."]
+position = Vector3(-14.0, 3.2, 8.0)
+light_color = Color(0.95, 0.24, 0.10, 1)
+light_energy = 1.15
+omni_range = 9.0
+shadow_enabled = true
+
+[node name="ThreatLight_Right" type="OmniLight3D" parent="."]
+position = Vector3(15.0, 3.0, 11.0)
+light_color = Color(0.95, 0.30, 0.12, 1)
+light_energy = 1.0
+omni_range = 8.0
+shadow_enabled = true
+
+[node name="ThreatLight_Gate" type="OmniLight3D" parent="."]
+position = Vector3(0.0, 4.0, -13.0)
+light_color = Color(0.75, 0.18, 0.10, 1)
+light_energy = 0.85
+omni_range = 10.0
+shadow_enabled = true

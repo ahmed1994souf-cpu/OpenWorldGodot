@@ -14,12 +14,31 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Check player model
+      - name: Find character model files
+        shell: bash
         run: |
-          set -e
-          echo "Checking player model..."
-          test -f assets/models/player.glb
-          ls -lh assets/models/player.glb
+          set +e
+
+          echo "=== Repository files ==="
+          find . -type f | sort | head -500
+
+          echo
+          echo "=== GLB files ==="
+          find . -type f \( -iname "*.glb" -o -iname "*.gltf" \) -print
+
+          echo
+          echo "=== FBX files ==="
+          find . -type f -iname "*.fbx" -print
+
+          echo
+          echo "=== TSCN files ==="
+          find . -type f -iname "*.tscn" -print
+
+          echo
+          echo "=== Referenced player paths ==="
+          grep -RniE "player\.glb|player\.gltf|player\.fbx|Skeleton3D" . \
+            --exclude-dir=.git \
+            2>/dev/null | head -200 || true
 
       - name: Install Godot 4.7.2
         shell: bash
@@ -38,95 +57,113 @@ jobs:
 
           godot --version
 
-      - name: Create skeleton inspector
+      - name: Create model inspector
         shell: bash
         run: |
           mkdir -p tools
 
-          cat > tools/dump_player_skeleton.gd <<'EOF'
+          cat > tools/find_skeletons.gd <<'EOF'
           extends SceneTree
 
           func _init() -> void:
               call_deferred("_inspect")
 
           func _inspect() -> void:
-              var path := "res://assets/models/player.glb"
+              print("=== SEARCHING FOR SKELETON3D ===")
 
-              var packed := load(path) as PackedScene
+              var models := _find_model_files("res://")
 
-              if packed == null:
-                  printerr("FAILED: Could not load " + path)
-                  quit(1)
-                  return
+              print("Model files found: ", models.size())
 
-              var instance := packed.instantiate()
-              root.add_child(instance)
+              for path in models:
+                  print("")
+                  print("MODEL: ", path)
 
-              var skeleton := _find_skeleton(instance)
+                  var packed := load(path) as PackedScene
 
-              if skeleton == null:
-                  printerr("FAILED: No Skeleton3D found in " + path)
-                  quit(2)
-                  return
+                  if packed == null:
+                      print("Could not load.")
+                      continue
 
-              var file := FileAccess.open(
-                  "res://skeleton_report.txt",
-                  FileAccess.WRITE
-              )
+                  var instance := packed.instantiate()
+                  root.add_child(instance)
 
-              if file == null:
-                  printerr("FAILED: Could not create skeleton_report.txt")
-                  quit(3)
-                  return
+                  var skeletons: Array[Skeleton3D] = []
+                  _find_skeletons(instance, skeletons)
 
-              print("=== PLAYER SKELETON ===")
-              print("Skeleton path: ", skeleton.get_path())
-              print("Bone count: ", skeleton.get_bone_count())
+                  print("Skeleton count: ", skeletons.size())
 
-              file.store_line(
-                  "Skeleton path: %s" % skeleton.get_path()
-              )
+                  for skeleton in skeletons:
+                      print("Skeleton: ", skeleton.get_path())
+                      print("Bones: ", skeleton.get_bone_count())
 
-              file.store_line(
-                  "Bone count: %d" % skeleton.get_bone_count()
-              )
+                      for i in range(skeleton.get_bone_count()):
+                          print(
+                              "  ",
+                              i,
+                              " ",
+                              skeleton.get_bone_name(i),
+                              " parent=",
+                              skeleton.get_bone_parent(i)
+                          )
 
-              file.store_line("")
-              file.store_line("index	name	parent")
+                  instance.queue_free()
 
-              for i in range(skeleton.get_bone_count()):
-                  var bone_name := skeleton.get_bone_name(i)
-                  var parent := skeleton.get_bone_parent(i)
-
-                  var line := "%d	%s	%d" % [
-                      i,
-                      bone_name,
-                      parent
-                  ]
-
-                  print(line)
-                  file.store_line(line)
-
-              file.close()
-
+              print("")
               print("=== DONE ===")
 
               quit(0)
 
-          func _find_skeleton(node: Node) -> Skeleton3D:
+          func _find_model_files(path: String) -> Array[String]:
+              var result: Array[String] = []
+
+              var dir := DirAccess.open(path)
+
+              if dir == null:
+                  return result
+
+              dir.list_dir_begin()
+
+              while true:
+                  var item := dir.get_next()
+
+                  if item == "":
+                      break
+
+                  if item == "." or item == "..":
+                      continue
+
+                  var full_path := path.path_join(item)
+
+                  if dir.current_is_dir():
+                      if not item.begins_with("."):
+                          result.append_array(
+                              _find_model_files(full_path)
+                          )
+                  else:
+                      var lower := item.to_lower()
+
+                      if lower.ends_with(".glb") \
+                      or lower.ends_with(".gltf") \
+                      or lower.ends_with(".fbx"):
+                          result.append(full_path)
+
+              dir.list_dir_end()
+
+              return result
+
+          func _find_skeletons(
+              node: Node,
+              result: Array[Skeleton3D]
+          ) -> void:
               if node is Skeleton3D:
-                  return node as Skeleton3D
+                  result.append(node)
 
               for child in node.get_children():
-                  var result := _find_skeleton(child)
-
-                  if result != null:
-                      return result
-
-              return null
+                  _find_skeletons(child, result)
           EOF
 
-      - name: Run skeleton inspection
+      - name: Run Godot skeleton inspection
         shell: bash
         run: |
           set -o pipefail
@@ -134,7 +171,7 @@ jobs:
           godot \
             --headless \
             --path . \
-            --script tools/dump_player_skeleton.gd \
+            --script tools/find_skeletons.gd \
             2>&1 | tee skeleton_console.log
 
       - name: Inspect MotionBricks joint API
@@ -147,19 +184,19 @@ jobs:
             /tmp/motion-bricks
 
           {
-            echo "=== MotionBricks header files ==="
+            echo "=== MotionBricks headers ==="
 
             find /tmp/motion-bricks \
               -maxdepth 3 \
               -type f \
-              \( -name '*.h' -o -name '*.hpp' \) \
+              \( -name "*.h" -o -name "*.hpp" \) \
               | sort
 
             echo
-            echo "=== Joint-related API lines ==="
+            echo "=== Joint-related API ==="
 
             grep -RniE \
-              'joint.*name|name.*joint|joint.*string|get_joint' \
+              "joint.*name|name.*joint|joint.*string|get_joint" \
               /tmp/motion-bricks/include \
               /tmp/motion-bricks/src \
               2>/dev/null \
@@ -173,6 +210,5 @@ jobs:
         with:
           name: player-skeleton-inspection
           path: |
-            skeleton_report.txt
             skeleton_console.log
             motionbricks_joint_api.txt

@@ -7,20 +7,20 @@ jobs:
   build:
     name: Build MotionBricks for Android ARM64
     runs-on: ubuntu-24.04
-    timeout-minutes: 150
+    timeout-minutes: 180
 
     steps:
 
-      # =========================================================
+      # ============================================================
       # 1. Checkout Godot project
-      # =========================================================
+      # ============================================================
       - name: Checkout Godot project
         uses: actions/checkout@v4
 
 
-      # =========================================================
-      # 2. Install build tools
-      # =========================================================
+      # ============================================================
+      # 2. Install tools
+      # ============================================================
       - name: Install build tools
         run: |
           sudo apt-get update
@@ -33,17 +33,17 @@ jobs:
             unzip
 
 
-      # =========================================================
+      # ============================================================
       # 3. Android SDK
-      # =========================================================
+      # ============================================================
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
 
-      # =========================================================
-      # 4. Android NDK
-      # =========================================================
-      - name: Install Android SDK and NDK
+      # ============================================================
+      # 4. Install Android NDK
+      # ============================================================
+      - name: Install Android SDK components
         run: |
           yes | sdkmanager --licenses || true
 
@@ -57,9 +57,9 @@ jobs:
           echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> "$GITHUB_ENV"
 
 
-      # =========================================================
-      # 5. Download Godot C++ bindings
-      # =========================================================
+      # ============================================================
+      # 5. Download Godot C++
+      # ============================================================
       - name: Download godot-cpp
         run: |
           git clone \
@@ -69,18 +69,18 @@ jobs:
             /tmp/godot-cpp
 
 
-      # =========================================================
-      # 6. Download MotionBricks source
+      # ============================================================
+      # 6. Download MotionBricks WITHOUT submodules
       #
       # IMPORTANT:
-      # Do NOT use the old FetchContent commit.
-      # We clone the actual repository with its GGML submodule.
-      # =========================================================
-      - name: Download MotionBricks
+      # Do NOT use --recurse-submodules.
+      # The repository currently references an unavailable GGML
+      # commit, which caused Workflow #4 to fail.
+      # ============================================================
+      - name: Download MotionBricks source
         run: |
           git clone \
             --depth 1 \
-            --recurse-submodules \
             https://github.com/localai-org/motion-bricks.cpp.git \
             /tmp/motion-bricks.cpp
 
@@ -90,22 +90,70 @@ jobs:
           git rev-parse HEAD
 
           echo ""
-          echo "GGML revision:"
-          git -C ggml rev-parse HEAD
+          echo "Removing broken GGML submodule..."
+
+          rm -rf ggml
+          rm -rf .git/modules/ggml
+
+          git config --file .gitmodules --remove-section submodule.ggml || true
+
+          echo ""
+          echo "MotionBricks source ready."
 
 
-      # =========================================================
-      # 7. Create Godot GDExtension source
-      # =========================================================
-      - name: Create Godot MotionBricks bridge
-        shell: bash
+      # ============================================================
+      # 7. Download current GGML
+      #
+      # We intentionally use a real current GGML checkout instead
+      # of MotionBricks' unavailable submodule revision.
+      # ============================================================
+      - name: Download GGML
         run: |
-          set -e
+          git clone \
+            --depth 1 \
+            https://github.com/ggml-org/ggml.git \
+            /tmp/ggml
 
+          cd /tmp/ggml
+
+          echo "GGML revision:"
+          git rev-parse HEAD
+
+
+      # ============================================================
+      # 8. Replace MotionBricks GGML directory
+      # ============================================================
+      - name: Attach GGML to MotionBricks
+        run: |
+          rm -rf /tmp/motion-bricks.cpp/ggml
+
+          cp -a \
+            /tmp/ggml \
+            /tmp/motion-bricks.cpp/ggml
+
+          rm -rf /tmp/motion-bricks.cpp/ggml/.git
+
+          echo "GGML attached."
+
+          ls -la /tmp/motion-bricks.cpp/ggml | head
+
+
+      # ============================================================
+      # 9. Prepare Godot native directory
+      # ============================================================
+      - name: Create native directories
+        run: |
           mkdir -p native/motion_bricks
           mkdir -p addons/motion_bricks/bin/android.release.arm64
+          mkdir -p motion_bricks/generated
 
 
+      # ============================================================
+      # 10. Create CMake
+      # ============================================================
+      - name: Create MotionBricks CMake
+        shell: bash
+        run: |
           cat > native/motion_bricks/CMakeLists.txt <<'EOF'
           cmake_minimum_required(VERSION 3.25)
 
@@ -118,10 +166,12 @@ jobs:
           set(CMAKE_CXX_STANDARD_REQUIRED ON)
           set(CMAKE_CXX_EXTENSIONS OFF)
 
+          set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-          # -----------------------------------------------------
+
+          # =====================================================
           # Godot C++
-          # -----------------------------------------------------
+          # =====================================================
 
           add_subdirectory(
               /tmp/godot-cpp
@@ -130,96 +180,43 @@ jobs:
           )
 
 
-          # -----------------------------------------------------
-          # Official MotionBricks source
-          # -----------------------------------------------------
+          # =====================================================
+          # GGML
+          # =====================================================
 
-          set(
-              MOTIONBRICKS_BUILD_TESTS
-              OFF
-              CACHE BOOL ""
-              FORCE
+          set(GGML_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+          set(GGML_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+
+          set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+          set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
+          set(GGML_VULKAN OFF CACHE BOOL "" FORCE)
+
+          set(GGML_CCACHE OFF CACHE BOOL "" FORCE)
+
+          add_subdirectory(
+              /tmp/motion-bricks.cpp/ggml
+              ${CMAKE_BINARY_DIR}/ggml
+              EXCLUDE_FROM_ALL
           )
 
-          set(
-              MOTIONBRICKS_ENABLE_GGML
-              ON
-              CACHE BOOL ""
-              FORCE
-          )
 
-          set(
-              MOTIONBRICKS_ENABLE_LLAMAFILE
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
+          # =====================================================
+          # MotionBricks
+          # =====================================================
 
-          set(
-              MOTIONBRICKS_ENABLE_VULKAN
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
+          set(MOTIONBRICKS_ENABLE_GGML ON CACHE BOOL "" FORCE)
 
-          set(
-              MOTIONBRICKS_ENABLE_PHYSICS
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
+          set(MOTIONBRICKS_ENABLE_VULKAN OFF CACHE BOOL "" FORCE)
 
-          set(
-              MOTIONBRICKS_ENABLE_FUZZERS
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
+          set(MOTIONBRICKS_ENABLE_PHYSICS OFF CACHE BOOL "" FORCE)
 
-          set(
-              MOTIONBRICKS_DOWNLOAD_MODELS
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
+          set(MOTIONBRICKS_ENABLE_LLAMAFILE OFF CACHE BOOL "" FORCE)
 
-          # Android ARM64:
-          # keep one generic CPU backend instead of building
-          # desktop-specific CPU variants.
-          set(
-              MOTIONBRICKS_CPU_ALL_VARIANTS
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
+          set(MOTIONBRICKS_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 
-          set(
-              GGML_NATIVE
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
+          set(MOTIONBRICKS_DOWNLOAD_MODELS OFF CACHE BOOL "" FORCE)
 
-          set(
-              GGML_OPENMP
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
-
-          set(
-              GGML_VULKAN
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
-
-          set(
-              GGML_LLAMAFILE
-              OFF
-              CACHE BOOL ""
-              FORCE
-          )
+          set(MOTIONBRICKS_CPU_ALL_VARIANTS OFF CACHE BOOL "" FORCE)
 
           add_subdirectory(
               /tmp/motion-bricks.cpp
@@ -228,9 +225,9 @@ jobs:
           )
 
 
-          # -----------------------------------------------------
-          # Godot extension
-          # -----------------------------------------------------
+          # =====================================================
+          # Godot GDExtension
+          # =====================================================
 
           add_library(
               motion_bricks_godot
@@ -244,9 +241,12 @@ jobs:
               PRIVATE
 
               /tmp/godot-cpp/include
+
               ${CMAKE_BINARY_DIR}/godot-cpp/gen/include
 
               /tmp/motion-bricks.cpp/include
+
+              /tmp/motion-bricks.cpp/ggml/include
           )
 
 
@@ -255,6 +255,7 @@ jobs:
               PRIVATE
 
               godot-cpp
+
               motionbricks_static
           )
 
@@ -273,28 +274,28 @@ jobs:
 
               PREFIX "lib"
 
-              OUTPUT_NAME
-              "motion_bricks_godot"
+              OUTPUT_NAME "motion_bricks_godot"
 
-              CXX_VISIBILITY_PRESET
-              hidden
+              CXX_VISIBILITY_PRESET hidden
 
-              VISIBILITY_INLINES_HIDDEN
-              ON
+              VISIBILITY_INLINES_HIDDEN ON
           )
           EOF
 
 
-      # =========================================================
-      # 8. Create native bridge
-      # =========================================================
-      - name: Create native bridge source
+      # ============================================================
+      # 11. Create native bridge
+      #
+      # This uses the stable MotionBricks C ABI.
+      # ============================================================
+      - name: Create native bridge
         shell: bash
         run: |
           cat > native/motion_bricks/motion_bricks_native.cpp <<'EOF'
           #include <godot_cpp/classes/object.hpp>
           #include <godot_cpp/core/class_db.hpp>
           #include <godot_cpp/godot.hpp>
+
           #include <godot_cpp/variant/dictionary.hpp>
           #include <godot_cpp/variant/packed_float32_array.hpp>
           #include <godot_cpp/variant/string.hpp>
@@ -302,6 +303,7 @@ jobs:
           #include <godot_cpp/variant/utility_functions.hpp>
 
           #include <motionbricks/motionbricks.h>
+
 
           using namespace godot;
 
@@ -313,15 +315,18 @@ jobs:
           private:
 
               mb_runtime_options *runtime_options = nullptr;
+
               mb_model *model = nullptr;
+
               mb_style *style = nullptr;
+
               mb_command *command = nullptr;
+
               mb_agent *agent = nullptr;
+
               mb_motion *motion = nullptr;
 
               bool configured = false;
-
-              uint64_t seed = 1;
 
 
               static void _bind_methods() {
@@ -354,10 +359,7 @@ jobs:
 
 
                   ClassDB::bind_method(
-                      D_METHOD(
-                          "sample",
-                          "frame"
-                      ),
+                      D_METHOD("sample", "frame"),
                       &MotionBricksNative::sample
                   );
 
@@ -381,61 +383,50 @@ jobs:
               }
 
 
-              bool check(
-                  mb_status status,
-                  const char *operation
-              ) {
-
-                  if (status == MB_OK) {
-                      return true;
-                  }
-
-
-                  UtilityFunctions::printerr(
-                      String("MotionBricks error: ") +
-                      String(operation) +
-                      String(" -> ") +
-                      String(mb_status_string(status))
-                  );
-
-
-                  return false;
-              }
-
-
               void cleanup() {
 
                   if (motion) {
+
                       mb_motion_free(motion);
+
                       motion = nullptr;
                   }
 
 
                   if (agent) {
+
                       mb_agent_free(agent);
+
                       agent = nullptr;
                   }
 
 
                   if (command) {
+
                       mb_command_free(command);
+
                       command = nullptr;
                   }
 
 
                   if (style) {
+
                       mb_style_free(style);
+
                       style = nullptr;
                   }
 
 
                   if (model) {
+
                       mb_model_free(model);
+
                       model = nullptr;
                   }
 
 
                   if (runtime_options) {
+
                       mb_runtime_options_free(
                           runtime_options
                       );
@@ -448,9 +439,33 @@ jobs:
               }
 
 
+              bool check_status(
+                  mb_status status,
+                  const char *operation
+              ) {
+
+                  if (status == MB_OK) {
+
+                      return true;
+                  }
+
+
+                  UtilityFunctions::printerr(
+                      String("MotionBricks error: ") +
+                      String(operation) +
+                      String(" : ") +
+                      String(mb_status_string(status))
+                  );
+
+
+                  return false;
+              }
+
+
           public:
 
               ~MotionBricksNative() {
+
                   cleanup();
               }
 
@@ -467,7 +482,7 @@ jobs:
                   char error[2048] = {};
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_runtime_options_create(
                           &runtime_options,
                           error,
@@ -475,11 +490,12 @@ jobs:
                       ),
                       "runtime_options_create"
                   )) {
+
                       return false;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_runtime_options_set_device(
                           runtime_options,
                           MB_DEVICE_CPU,
@@ -488,11 +504,12 @@ jobs:
                       ),
                       "set_device"
                   )) {
+
                       return false;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_runtime_options_set_threads(
                           runtime_options,
                           static_cast<uint32_t>(
@@ -503,11 +520,12 @@ jobs:
                       ),
                       "set_threads"
                   )) {
+
                       return false;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_model_load(
                           model_path.utf8().get_data(),
                           runtime_options,
@@ -517,11 +535,12 @@ jobs:
                       ),
                       "model_load"
                   )) {
+
                       return false;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_style_load(
                           model,
                           style_path.utf8().get_data(),
@@ -531,11 +550,12 @@ jobs:
                       ),
                       "style_load"
                   )) {
+
                       return false;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_command_create(
                           &command,
                           error,
@@ -543,11 +563,12 @@ jobs:
                       ),
                       "command_create"
                   )) {
+
                       return false;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_agent_create(
                           model,
                           &agent,
@@ -556,11 +577,12 @@ jobs:
                       ),
                       "agent_create"
                   )) {
+
                       return false;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_agent_reset(
                           agent,
                           style,
@@ -569,6 +591,7 @@ jobs:
                       ),
                       "agent_reset"
                   )) {
+
                       return false;
                   }
 
@@ -580,6 +603,7 @@ jobs:
 
 
               bool is_configured() const {
+
                   return configured;
               }
 
@@ -587,13 +611,14 @@ jobs:
               int joint_count() const {
 
                   if (!model) {
+
                       return 0;
                   }
 
 
                   uint32_t count = 0;
 
-                  char error[256] = {};
+                  char error[512] = {};
 
 
                   if (
@@ -604,6 +629,7 @@ jobs:
                           sizeof(error)
                       ) != MB_OK
                   ) {
+
                       return 0;
                   }
 
@@ -618,11 +644,12 @@ jobs:
                       !configured ||
                       !agent
                   ) {
+
                       return;
                   }
 
 
-                  char error[256] = {};
+                  char error[512] = {};
 
 
                   mb_agent_reset(
@@ -644,6 +671,7 @@ jobs:
                       !agent ||
                       !command
                   ) {
+
                       return false;
                   }
 
@@ -651,7 +679,7 @@ jobs:
                   char error[1024] = {};
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_command_set_movement_direction(
                           command,
                           move.x,
@@ -660,13 +688,14 @@ jobs:
                           error,
                           sizeof(error)
                       ),
-                      "movement"
+                      "movement_direction"
                   )) {
+
                       return false;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_command_set_facing_direction(
                           command,
                           facing.x,
@@ -675,27 +704,22 @@ jobs:
                           error,
                           sizeof(error)
                       ),
-                      "facing"
+                      "facing_direction"
                   )) {
+
                       return false;
                   }
 
 
-                  mb_command_set_seed(
-                      command,
-                      seed++,
-                      error,
-                      sizeof(error)
-                  );
-
-
                   if (motion) {
+
                       mb_motion_free(motion);
+
                       motion = nullptr;
                   }
 
 
-                  if (!check(
+                  if (!check_status(
                       mb_agent_plan(
                           agent,
                           command,
@@ -705,6 +729,7 @@ jobs:
                       ),
                       "agent_plan"
                   )) {
+
                       return false;
                   }
 
@@ -724,6 +749,7 @@ jobs:
                       !configured ||
                       !motion
                   ) {
+
                       return result;
                   }
 
@@ -732,13 +758,16 @@ jobs:
 
 
                   uint64_t frame_count = 0;
-                  uint64_t joint_count_value = 0;
+
+                  uint64_t joints = 0;
 
                   const float *roots = nullptr;
+
                   const float *rotations = nullptr;
 
-                  uint64_t root_values = 0;
-                  uint64_t rotation_values = 0;
+                  uint64_t root_count = 0;
+
+                  uint64_t rotation_count = 0;
 
 
                   if (
@@ -749,6 +778,7 @@ jobs:
                           sizeof(error)
                       ) != MB_OK
                   ) {
+
                       return result;
                   }
 
@@ -756,11 +786,12 @@ jobs:
                   if (
                       mb_motion_get_joint_count(
                           motion,
-                          &joint_count_value,
+                          &joints,
                           error,
                           sizeof(error)
                       ) != MB_OK
                   ) {
+
                       return result;
                   }
 
@@ -769,11 +800,12 @@ jobs:
                       mb_motion_get_root_translations(
                           motion,
                           &roots,
-                          &root_values,
+                          &root_count,
                           error,
                           sizeof(error)
                       ) != MB_OK
                   ) {
+
                       return result;
                   }
 
@@ -782,20 +814,22 @@ jobs:
                       mb_motion_get_local_rotations_xyzw(
                           motion,
                           &rotations,
-                          &rotation_values,
+                          &rotation_count,
                           error,
                           sizeof(error)
                       ) != MB_OK
                   ) {
+
                       return result;
                   }
 
 
                   if (
                       frame_count == 0 ||
-                      joint_count_value == 0 ||
+                      joints == 0 ||
                       rotations == nullptr
                   ) {
+
                       return result;
                   }
 
@@ -803,15 +837,18 @@ jobs:
                   int f = CLAMP(
                       frame,
                       0,
-                      static_cast<int>(frame_count - 1)
+                      static_cast<int>(
+                          frame_count - 1
+                      )
                   );
 
 
                   Vector3 root;
 
+
                   if (
-                      roots != nullptr &&
-                      root_values >=
+                      roots &&
+                      root_count >=
                           static_cast<uint64_t>(
                               f * 3 + 3
                           )
@@ -825,36 +862,46 @@ jobs:
                   }
 
 
-                  PackedFloat32Array pose;
-
-                  const int total =
+                  const int values =
                       static_cast<int>(
-                          joint_count_value * 4
+                          joints * 4
                       );
 
 
-                  pose.resize(total);
+                  PackedFloat32Array pose;
+
+                  pose.resize(values);
 
 
-                  for (int i = 0; i < total; ++i) {
+                  const int offset =
+                      f * values;
+
+
+                  for (
+                      int i = 0;
+                      i < values;
+                      ++i
+                  ) {
 
                       pose[i] =
-                          rotations[
-                              f *
-                              static_cast<int>(
-                                  joint_count_value * 4
-                              ) +
-                              i
-                          ];
+                          rotations[offset + i];
                   }
 
 
                   result["root"] = root;
+
                   result["rotations"] = pose;
+
                   result["frames"] =
-                      static_cast<int>(frame_count);
+                      static_cast<int>(
+                          frame_count
+                      );
+
                   result["joints"] =
-                      static_cast<int>(joint_count_value);
+                      static_cast<int>(
+                          joints
+                      );
+
                   result["frame"] = f;
 
 
@@ -871,16 +918,19 @@ jobs:
                       !agent ||
                       frames <= 0
                   ) {
+
                       return;
                   }
 
 
-                  char error[256] = {};
+                  char error[512] = {};
 
 
                   mb_agent_advance(
                       agent,
-                      static_cast<uint32_t>(frames),
+                      static_cast<uint32_t>(
+                          frames
+                      ),
                       error,
                       sizeof(error)
                   );
@@ -917,7 +967,10 @@ jobs:
           motion_bricks_godot_library_init(
               GDExtensionInterfaceGetProcAddress
                   get_proc_address,
-              GDExtensionClassLibraryPtr library,
+
+              GDExtensionClassLibraryPtr
+                  library,
+
               GDExtensionInitialization *
                   initialization
           ) {
@@ -952,16 +1005,16 @@ jobs:
           EOF
 
 
-      # =========================================================
-      # 9. Create GDExtension descriptor
-      # =========================================================
+      # ============================================================
+      # 12. Create GDExtension file
+      # ============================================================
       - name: Create GDExtension descriptor
-        shell: bash
         run: |
           cat > addons/motion_bricks/motion_bricks.gdextension <<'EOF'
           [configuration]
 
           entry_symbol = "motion_bricks_godot_library_init"
+
           compatibility_minimum = "4.7"
 
 
@@ -971,15 +1024,14 @@ jobs:
           EOF
 
 
-      # =========================================================
-      # 10. Configure CMake
-      # =========================================================
-      - name: Configure Android ARM64 build
-        working-directory: native/motion_bricks
+      # ============================================================
+      # 13. Configure
+      # ============================================================
+      - name: Configure Android ARM64
         run: |
           cmake \
-            -S . \
-            -B "$GITHUB_WORKSPACE/build/android-arm64" \
+            -S native/motion_bricks \
+            -B build/android-arm64 \
             -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$ANDROID_NDK_HOME/build/cmake/android.toolchain.cmake" \
@@ -989,10 +1041,10 @@ jobs:
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON
 
 
-      # =========================================================
-      # 11. Build only the Godot extension
-      # =========================================================
-      - name: Build MotionBricks Godot extension
+      # ============================================================
+      # 14. Build
+      # ============================================================
+      - name: Build native library
         run: |
           cmake \
             --build build/android-arm64 \
@@ -1000,12 +1052,12 @@ jobs:
             --parallel 2
 
 
-      # =========================================================
-      # 12. Find native library
-      # =========================================================
-      - name: Verify native library
+      # ============================================================
+      # 15. Verify output
+      # ============================================================
+      - name: Verify Android library
         run: |
-          echo "Searching for Android library..."
+          echo "Searching for library..."
 
           find build/android-arm64 \
             -type f \
@@ -1020,43 +1072,45 @@ jobs:
           )"
 
           if [ -z "$LIB" ]; then
-            echo "ERROR: libmotion_bricks_godot.so was not produced."
+            echo "ERROR:"
+            echo "libmotion_bricks_godot.so was not created."
             exit 1
           fi
 
-          echo "Library:"
+          echo "SUCCESS:"
           ls -lh "$LIB"
 
 
-      # =========================================================
-      # 13. Download official MotionBricks weights/styles
-      # =========================================================
-      - name: Download official MotionBricks runtime
+      # ============================================================
+      # 16. Download official MotionBricks model
+      # ============================================================
+      - name: Download MotionBricks model
         run: |
           python3 \
             /tmp/motion-bricks.cpp/scripts/download_gguf_weights.py \
             --output motion_bricks/generated
 
 
-      # =========================================================
-      # 14. Verify model
-      # =========================================================
+      # ============================================================
+      # 17. Verify model
+      # ============================================================
       - name: Verify MotionBricks model
         run: |
-          test -d motion_bricks/generated/g1-f32
-          test -d motion_bricks/generated/styles
+          echo "Generated MotionBricks files:"
 
-          echo "MotionBricks model:"
           find motion_bricks/generated \
-            -maxdepth 3 \
             -type f \
             -print
 
+          test -d motion_bricks/generated/g1-f32
 
-      # =========================================================
-      # 15. Install native library
-      # =========================================================
-      - name: Install Android GDExtension
+          test -d motion_bricks/generated/styles
+
+
+      # ============================================================
+      # 18. Copy Android library
+      # ============================================================
+      - name: Install Android GDExtension library
         run: |
           LIB="$(
             find build/android-arm64 \
@@ -1065,17 +1119,18 @@ jobs:
               | head -n 1
           )"
 
-          cp "$LIB" \
-            addons/motion_bricks/bin/android.release.arm64/
+          cp \
+            "$LIB" \
+            addons/motion_bricks/bin/android.release.arm64/libmotion_bricks_godot.so
 
           ls -lh \
-            addons/motion_bricks/bin/android.release.arm64/
+            addons/motion_bricks/bin/android.release.arm64/libmotion_bricks_godot.so
 
 
-      # =========================================================
-      # 16. Create runtime package
-      # =========================================================
-      - name: Package MotionBricks Android runtime
+      # ============================================================
+      # 19. Package
+      # ============================================================
+      - name: Package runtime
         run: |
           mkdir -p dist
 
@@ -1088,10 +1143,10 @@ jobs:
             dist/MotionBricks-Android-ARM64-runtime.zip
 
 
-      # =========================================================
-      # 17. Upload artifact
-      # =========================================================
-      - name: Upload MotionBricks Android runtime
+      # ============================================================
+      # 20. Upload artifact
+      # ============================================================
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: MotionBricks-Android-ARM64-runtime

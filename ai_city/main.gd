@@ -530,8 +530,8 @@ func _show_ai_virtual_keyboard(edit: LineEdit) -> void:
 
 func _open_ai_setup() -> void:
     if llm_client != null:
-        ai_endpoint_input.text = str(llm_client.endpoint) if not str(llm_client.endpoint).is_empty() else "https://api.x.ai/v1/chat/completions"
-        ai_model_input.text = str(llm_client.model) if not str(llm_client.model).is_empty() else "grok-4.6"
+        ai_endpoint_input.text = str(llm_client.endpoint) if not str(llm_client.endpoint).is_empty() else "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+        ai_model_input.text = str(llm_client.model) if not str(llm_client.model).is_empty() else "gemini-2.5-flash"
         ai_key_input.text = str(llm_client.api_key)
     ai_setup_dialog.visible = true
     _layout_grok_setup()
@@ -571,7 +571,7 @@ func _save_ai_setup() -> void:
         status_label.text = "Gemini settings saved privately on this device."
         _close_ai_setup()
     else:
-        status_label.text = "Could not save Grok settings (error %s)." % save_error
+        status_label.text = "Could not save Gemini settings (error %s)." % save_error
 
 func _use_local_brain() -> void:
     llm_client.save_config("", "", "")
@@ -614,8 +614,8 @@ func _send_message() -> void:
     if llm_client == null or not llm_client.is_configured():
         last_ai_error = "No AI model configured"
         prompt.text = "AI is not connected"
-        _append_chat_line("SYSTEM", "لم يصل Grok بعد: افتح GROK AI SETUP وأدخل مفتاح xAI صالحًا. عنوان Grok واسم النموذج مضبوطان تلقائيًا.")
-        status_label.text = "GROK NOT CONNECTED — add a valid xAI API key in GROK AI SETUP."
+        _append_chat_line("SYSTEM", "لم يصل رد Gemini بعد: افتح GEMINI AI SETUP وأدخل مفتاح Gemini صالحًا. عنوان Gemini واسم النموذج مضبوطان تلقائيًا.")
+        status_label.text = "GEMINI NOT CONNECTED — add a valid Gemini API key in GEMINI AI SETUP."
         chat_input.grab_focus()
         call_deferred("_show_virtual_keyboard")
         return

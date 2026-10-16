@@ -18,7 +18,7 @@ func _ready() -> void:
 	_request.request_completed.connect(_on_request_completed)
 
 const DEFAULT_ENDPOINT: String = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-const DEFAULT_MODEL: String = "grok-4.6"
+const DEFAULT_MODEL: String = "gemini-2.5-flash"
 
 func _load_config() -> void:
 	endpoint = DEFAULT_ENDPOINT

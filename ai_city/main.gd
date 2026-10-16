@@ -135,7 +135,7 @@ func _build_ui() -> void:
     add_child(layer)
     status_label = Label.new()
     status_label.position = Vector2(24, 20)
-    status_label.text = "AI CITY — Prototype 01\nFour AI-ready NPC capsules. Walk close and tap TALK."
+    status_label.text = "AI CITY — Prototype 02\nTalk to a nearby NPC. Try: follow me / stop / hello / أين؟"
     status_label.add_theme_font_size_override("font_size", 22)
     layer.add_child(status_label)
     var talk := Button.new()
@@ -205,9 +205,10 @@ func _send_message() -> void:
         return
     var text := chat_input.text.strip_edges()
     chat_input.clear()
-    var response := selected_npc.get_response(text)
+    var response: String = selected_npc.get_response(text)
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
     prompt.text = "%s: %s" % [selected_npc.get_meta("display_name"), response]
+    status_label.text = "%s is now in %s mode." % [selected_npc.get_meta("display_name"), selected_npc.behavior]
 
 func _process(delta: float) -> void:
     if player == null:

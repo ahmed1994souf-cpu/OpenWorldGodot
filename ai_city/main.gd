@@ -371,7 +371,7 @@ func _build_ai_setup() -> void:
     # Keep the setup entry point visible on phone-sized screens.
     grok_setup_button = Button.new()
     grok_setup_button.name = "GrokSetupButton"
-    grok_setup_button.text = "GROK AI SETUP"
+    grok_setup_button.text = "GEMINI AI SETUP"
     grok_setup_button.size = Vector2(180.0, 54.0)
     grok_setup_button.add_theme_font_size_override("font_size", 18)
     grok_setup_button.pressed.connect(_open_ai_setup)
@@ -410,7 +410,7 @@ func _build_ai_setup() -> void:
     margins.add_child(content)
 
     var heading := Label.new()
-    heading.text = "CONNECT NPCs TO GROK"
+    heading.text = "CONNECT NPCs TO GEMINI"
     heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
     heading.add_theme_font_size_override("font_size", 22)
     content.add_child(heading)
@@ -431,13 +431,13 @@ func _build_ai_setup() -> void:
     fields.add_theme_constant_override("separation", 10)
     fields_scroll.add_child(fields)
 
-    ai_endpoint_input = _make_ai_setup_field(fields, "GrokEndpointInput", "API endpoint", "https://api.x.ai/v1/chat/completions")
-    ai_endpoint_input.text = "https://api.x.ai/v1/chat/completions"
+    ai_endpoint_input = _make_ai_setup_field(fields, "GrokEndpointInput", "Gemini API endpoint", "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions")
+    ai_endpoint_input.text = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
-    ai_model_input = _make_ai_setup_field(fields, "GrokModelInput", "Model name", "grok-4.6")
-    ai_model_input.text = "grok-4.6"
+    ai_model_input = _make_ai_setup_field(fields, "GrokModelInput", "Gemini model name", "gemini-2.5-flash")
+    ai_model_input.text = "gemini-2.5-flash"
 
-    ai_key_input = _make_ai_setup_field(fields, "GrokApiKeyInput", "xAI API key", "Tap here, then paste your xAI key")
+    ai_key_input = _make_ai_setup_field(fields, "GrokApiKeyInput", "Google Gemini API key", "Paste your Gemini API key")
     ai_key_input.secret = true
 
     var key_actions := HBoxContainer.new()
@@ -558,17 +558,17 @@ func _save_ai_setup() -> void:
     var endpoint := ai_endpoint_input.text.strip_edges()
     var model_name := ai_model_input.text.strip_edges()
     if endpoint.is_empty():
-        endpoint = "https://api.x.ai/v1/chat/completions"
+        endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
     if model_name.is_empty():
-        model_name = "grok-4.6"
+        model_name = "gemini-2.5-flash"
     if ai_key_input.text.strip_edges().is_empty():
-        status_label.text = "Grok API key is empty. Tap the key field or PASTE KEY before saving."
+        status_label.text = "Gemini API key is empty. Tap the key field or PASTE KEY before saving."
         ai_key_input.grab_focus()
         call_deferred("_show_ai_virtual_keyboard", ai_key_input)
         return
     var save_error: int = llm_client.save_config(endpoint, model_name, ai_key_input.text.strip_edges())
     if save_error == OK:
-        status_label.text = "Grok settings saved privately on this device."
+        status_label.text = "Gemini settings saved privately on this device."
         _close_ai_setup()
     else:
         status_label.text = "Could not save Grok settings (error %s)." % save_error

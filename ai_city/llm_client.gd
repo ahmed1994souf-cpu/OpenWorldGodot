@@ -38,11 +38,8 @@ func is_configured() -> bool:
 	return not endpoint.is_empty() and not model.is_empty()
 
 func ask(messages: Array) -> bool:
-	if _active:
-		completed.emit(false, {}, "An AI request is already running.")
-		return false
-	if not is_configured():
-		completed.emit(false, {}, "AI provider is not configured. Using local NPC brain.")
+	# Return false so the caller can use local fallback without processing the same message twice.
+	if _active or not is_configured():
 		return false
 	var headers := PackedStringArray(["Content-Type: application/json"])
 	if not api_key.is_empty():
@@ -52,7 +49,6 @@ func ask(messages: Array) -> bool:
 	var err := _request.request(endpoint, headers, HTTPClient.METHOD_POST, JSON.stringify(payload))
 	if err != OK:
 		_active = false
-		completed.emit(false, {}, "Could not start HTTP request (error %s)." % err)
 		return false
 	return true
 

@@ -167,10 +167,10 @@ func build_ai_messages(user_text: String) -> Array:
 
 func apply_remote_plan(user_text: String, plan: Dictionary) -> String:
 	if not brain_ready:
-		return "I am listening."
+		return ""
 	var result: Dictionary = brain.accept_remote_plan(user_text, plan)
 	_apply_brain_action(str(result.get("action", "none")))
 	set_meta("last_intent", str(result.get("intent", "conversation")))
 	set_meta("last_action", str(result.get("action", "none")))
 	set_meta("memory_size", int(result.get("memory_size", 0)))
-	return str(result.get("response", "I am listening."))
+	return str(result.get("response", ""))

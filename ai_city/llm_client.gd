@@ -17,12 +17,22 @@ func _ready() -> void:
 	add_child(_request)
 	_request.request_completed.connect(_on_request_completed)
 
+const DEFAULT_ENDPOINT: String = "https://api.x.ai/v1/chat/completions"
+const DEFAULT_MODEL: String = "grok-4.6"
+
 func _load_config() -> void:
+	endpoint = DEFAULT_ENDPOINT
+	model = DEFAULT_MODEL
+	api_key = ""
 	var config := ConfigFile.new()
 	if config.load("user://ai_city_config.cfg") == OK:
-		endpoint = str(config.get_value("llm", "endpoint", ""))
-		api_key = str(config.get_value("llm", "api_key", ""))
-		model = str(config.get_value("llm", "model", ""))
+		endpoint = str(config.get_value("llm", "endpoint", DEFAULT_ENDPOINT)).strip_edges()
+		api_key = str(config.get_value("llm", "api_key", "")).strip_edges()
+		model = str(config.get_value("llm", "model", DEFAULT_MODEL)).strip_edges()
+	if endpoint.is_empty():
+		endpoint = DEFAULT_ENDPOINT
+	if model.is_empty():
+		model = DEFAULT_MODEL
 
 func save_config(new_endpoint: String, new_model: String, new_api_key: String) -> Error:
 	endpoint = new_endpoint.strip_edges()

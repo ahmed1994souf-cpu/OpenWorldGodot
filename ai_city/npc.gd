@@ -139,25 +139,9 @@ func _face_player(delta: float) -> void:
     if flat.length_squared() > 0.01:
         rotation.y = lerp_angle(rotation.y, atan2(-flat.x, -flat.z), delta * 6.0)
 
-func get_response(text: String) -> String:
-    conversation_count += 1
-    if not brain_ready:
-        return "Give me a second. I am thinking."
-
-    var world: Dictionary = {
-        "player_distance": last_player_distance,
-        "npc_position": global_position,
-        "player_position": player.global_position if player != null else global_position,
-        "behavior": behavior,
-        "city_time": Time.get_time_string_from_system()
-    }
-    var result: Dictionary = brain.plan(text, world)
-    var action: String = str(result.get("action", "talk"))
-    _apply_brain_action(action)
-    set_meta("last_intent", str(result.get("intent", "conversation")))
-    set_meta("last_action", action)
-    set_meta("memory_size", int(result.get("memory_size", 0)))
-    return str(result.get("response", "I am listening."))
+func get_response(_text: String) -> String:
+    # Deliberately disabled: NPCs must never answer from scripted local dialogue.
+    return ""
 
 func _apply_brain_action(action: String) -> void:
     match action:

@@ -10,6 +10,10 @@ var camera: Camera3D
 var llm_client: Node
 var pending_npc: CharacterBody3D
 var pending_user_text: String = ""
+var ai_setup_dialog: AcceptDialog
+var ai_endpoint_input: LineEdit
+var ai_model_input: LineEdit
+var ai_key_input: LineEdit
 var navigation_region: NavigationRegion3D
 
 func _ready() -> void:
@@ -22,6 +26,7 @@ func _ready() -> void:
     llm_client.name = "LLMClient"
     add_child(llm_client)
     llm_client.completed.connect(_on_llm_completed)
+    _build_ai_setup()
 
 func _build_world() -> void:
     var env := WorldEnvironment.new()
@@ -214,6 +219,64 @@ func _build_ui() -> void:
     send.pressed.connect(_send_message)
     box.add_child(send)
     chat_input.text_submitted.connect(func(_text: String): _send_message())
+
+
+func _build_ai_setup() -> void:
+    var layer: CanvasLayer = get_node_or_null("CanvasLayer")
+    if layer == null:
+        layer = get_child(0) as CanvasLayer
+    var setup_button := Button.new()
+    setup_button.text = "AI SETUP"
+    setup_button.position = Vector2(1040, 520)
+    setup_button.size = Vector2(180, 58)
+    setup_button.pressed.connect(_open_ai_setup)
+    layer.add_child(setup_button)
+
+    ai_setup_dialog = AcceptDialog.new()
+    ai_setup_dialog.title = "Connect NPC AI"
+    ai_setup_dialog.dialog_text = "OpenAI-compatible chat endpoint. Saved privately on this device."
+    ai_setup_dialog.size = Vector2i(650, 360)
+    layer.add_child(ai_setup_dialog)
+    var fields := VBoxContainer.new()
+    ai_setup_dialog.add_child(fields)
+    ai_endpoint_input = LineEdit.new()
+    ai_endpoint_input.placeholder_text = "Endpoint URL (include /v1/chat/completions)"
+    fields.add_child(ai_endpoint_input)
+    ai_model_input = LineEdit.new()
+    ai_model_input.placeholder_text = "Model name"
+    fields.add_child(ai_model_input)
+    ai_key_input = LineEdit.new()
+    ai_key_input.placeholder_text = "API key (optional for local providers)"
+    ai_key_input.secret = true
+    fields.add_child(ai_key_input)
+    var save_button := Button.new()
+    save_button.text = "Save AI Settings"
+    save_button.pressed.connect(_save_ai_setup)
+    fields.add_child(save_button)
+    var local_button := Button.new()
+    local_button.text = "Use Offline NPC Brain"
+    local_button.pressed.connect(_use_local_brain)
+    fields.add_child(local_button)
+
+func _open_ai_setup() -> void:
+    if llm_client != null:
+        ai_endpoint_input.text = str(llm_client.endpoint)
+        ai_model_input.text = str(llm_client.model)
+        ai_key_input.text = str(llm_client.api_key)
+    ai_setup_dialog.popup_centered()
+
+func _save_ai_setup() -> void:
+    var save_error: int = llm_client.save_config(ai_endpoint_input.text, ai_model_input.text, ai_key_input.text)
+    if save_error == OK:
+        status_label.text = "AI settings saved on this device."
+        ai_setup_dialog.hide()
+    else:
+        status_label.text = "Could not save AI settings (error %s)." % save_error
+
+func _use_local_brain() -> void:
+    llm_client.save_config("", "", "")
+    status_label.text = "Offline NPC brain enabled."
+    ai_setup_dialog.hide()
 
 func _talk_nearest() -> void:
     var nearest: CharacterBody3D = null

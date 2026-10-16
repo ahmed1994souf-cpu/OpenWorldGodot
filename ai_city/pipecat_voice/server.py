@@ -56,7 +56,7 @@ async def offer(request: SmallWebRTCRequest, background_tasks: BackgroundTasks):
 async def run_bot_for_connection(connection):
     # The request handler creates a SmallWebRTCConnection; use Pipecat's standard
     # runner transport adapter so audio stays on WebRTC rather than HTTP chunks.
-    from pipecat.runner.types import SmallWebRTCRunnerArguments
+    from types import SimpleNamespace
     from pipecat.transports.smallwebrtc.transport import SmallWebRTCTransport
     from pipecat.transports.base_transport import TransportParams
 
@@ -66,7 +66,10 @@ async def run_bot_for_connection(connection):
     )
     # Runner arguments are normally created by the CLI. This direct web endpoint
     # is deliberately kept separate until the Godot-native client is connected.
-    await run_bot(transport, SmallWebRTCRunnerArguments())
+    await run_bot(
+        transport,
+        SimpleNamespace(handle_sigint=False, pipeline_idle_timeout_secs=300),
+    )
 
 
 @app.patch("/api/offer")

@@ -415,31 +415,39 @@ func _talk_nearest() -> void:
 func _send_message() -> void:
     if selected_npc == null or is_waiting_for_reply or chat_input.text.strip_edges().is_empty():
         return
-    var text := chat_input.text.strip_edges()
+    var user_text := chat_input.text.strip_edges()
     chat_input.clear()
-    _append_chat_line("You", text)
+    _append_chat_line("You", user_text)
     pending_npc = selected_npc
-    pending_user_text = text
-    var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
+    pending_user_text = user_text
     last_reply_used_remote_ai = false
     last_ai_error = ""
-    if llm_client != null and llm_client.is_configured():
-        is_waiting_for_reply = true
-        if send_button != null:
-            send_button.disabled = true
-            send_button.text = "…"
-        prompt.text = "%s is thinking…" % selected_npc.get_meta("display_name")
-        var accepted: bool = llm_client.ask(selected_npc.build_ai_messages(text))
-        if accepted:
-            return
-        last_ai_error = "The AI request could not be started."
-        is_waiting_for_reply = false
-        if send_button != null:
-            send_button.disabled = false
-            send_button.text = "Send"
-        # If the request could not start, use the local brain once.
-    var response: String = selected_npc.get_response(text)
-    _show_npc_response(selected_npc, response)
+    var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
+    if llm_client == null or not llm_client.is_configured():
+        last_ai_error = "No AI model configured"
+        prompt.text = "AI is not connected"
+        _append_chat_line("SYSTEM", "لم يُرسل رد من الشخصية لأن نموذج الذكاء الاصطناعي غير مضبوط. افتح AI SETUP وأدخل عنوان الخدمة واسم النموذج.")
+        status_label.text = "AI NOT CONNECTED — no NPC reply generated. Configure AI SETUP."
+        chat_input.grab_focus()
+        call_deferred("_show_virtual_keyboard")
+        return
+
+    is_waiting_for_reply = true
+    if send_button != null:
+        send_button.disabled = true
+        send_button.text = "…"
+    prompt.text = "%s is waiting for the AI model…" % selected_npc.get_meta("display_name")
+    var accepted: bool = llm_client.ask(selected_npc.build_ai_messages(user_text))
+    if accepted:
+        return
+    is_waiting_for_reply = false
+    if send_button != null:
+        send_button.disabled = false
+        send_button.text = "Send"
+    last_ai_error = "The AI request could not be started."
+    prompt.text = "AI request did not start"
+    _append_chat_line("SYSTEM", "لم يرد النموذج: تعذّر بدء طلب الذكاء الاصطناعي. راجع إعدادات AI SETUP.")
+    status_label.text = "AI REQUEST FAILED — no scripted NPC fallback is used."
     chat_input.grab_focus()
     call_deferred("_show_virtual_keyboard")
 
@@ -450,16 +458,24 @@ func _on_llm_completed(success: bool, result: Dictionary, error_message: String)
         send_button.text = "Send"
     if pending_npc == null or not is_instance_valid(pending_npc):
         return
-    var response: String
     if success:
         last_reply_used_remote_ai = true
         last_ai_error = ""
-        response = pending_npc.apply_remote_plan(pending_user_text, result)
+        var response: String = pending_npc.apply_remote_plan(pending_user_text, result)
+        if response.strip_edges().is_empty():
+            last_reply_used_remote_ai = false
+            last_ai_error = "AI returned an empty reply"
+            _append_chat_line("SYSTEM", "وصل رد فارغ من النموذج. لم يتم استبداله بجملة محفوظة.")
+            status_label.text = "AI returned an empty reply."
+        else:
+            _show_npc_response(pending_npc, response)
     else:
         last_reply_used_remote_ai = false
         last_ai_error = error_message
-        response = pending_npc.get_response(pending_user_text)
-    _show_npc_response(pending_npc, response)
+        _append_chat_line("SYSTEM", "فشل طلب الذكاء الاصطناعي: " + error_message + ". لم يتم استخدام رد محفوظ.")
+        status_label.text = "AI REQUEST FAILED — no scripted NPC fallback. " + error_message.left(120)
+        var error_prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
+        error_prompt.text = "AI request failed; no NPC reply was generated."
     chat_input.grab_focus()
     call_deferred("_show_virtual_keyboard")
 
@@ -468,13 +484,9 @@ func _show_npc_response(npc: CharacterBody3D, response: String) -> void:
     last_npc_response = response
     prompt.text = "%s replied" % npc.get_meta("display_name")
     _append_chat_line(str(npc.get_meta("display_name")), response)
-    var mode_note := " | OFFLINE scripted dialogue — no model reply used"
-    if last_reply_used_remote_ai:
-        mode_note = " | REAL MODEL RESPONSE received"
-    elif llm_client != null and llm_client.is_configured():
-        mode_note = " | AI configured, but this reply used offline fallback"
+    var mode_note := " | REAL MODEL RESPONSE received" if last_reply_used_remote_ai else " | NO AI REPLY"
     if not last_ai_error.is_empty():
-        mode_note += " | AI error: " + last_ai_error.left(100)
+        mode_note += " | " + last_ai_error.left(100)
     status_label.text = "%s | intent: %s | action: %s | memory: %s%s" % [
         npc.get_meta("display_name"),
         npc.get_meta("last_intent", "conversation"),

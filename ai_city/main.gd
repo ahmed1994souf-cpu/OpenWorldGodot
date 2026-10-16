@@ -10,6 +10,8 @@ var chat_history_label: RichTextLabel
 var send_button: Button
 var chat_history_text: String = ""
 var is_waiting_for_reply: bool = false
+var last_reply_used_remote_ai: bool = false
+var last_ai_error: String = ""
 var camera: Camera3D
 var llm_client: Node
 var pending_npc: CharacterBody3D
@@ -419,6 +421,8 @@ func _send_message() -> void:
     pending_npc = selected_npc
     pending_user_text = text
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
+    last_reply_used_remote_ai = false
+    last_ai_error = ""
     if llm_client != null and llm_client.is_configured():
         is_waiting_for_reply = true
         if send_button != null:
@@ -428,6 +432,7 @@ func _send_message() -> void:
         var accepted: bool = llm_client.ask(selected_npc.build_ai_messages(text))
         if accepted:
             return
+        last_ai_error = "The AI request could not be started."
         is_waiting_for_reply = false
         if send_button != null:
             send_button.disabled = false
@@ -447,11 +452,13 @@ func _on_llm_completed(success: bool, result: Dictionary, error_message: String)
         return
     var response: String
     if success:
+        last_reply_used_remote_ai = true
+        last_ai_error = ""
         response = pending_npc.apply_remote_plan(pending_user_text, result)
     else:
+        last_reply_used_remote_ai = false
+        last_ai_error = error_message
         response = pending_npc.get_response(pending_user_text)
-        if not error_message.is_empty():
-            status_label.text = "AI request failed; used offline dialogue: " + error_message
     _show_npc_response(pending_npc, response)
     chat_input.grab_focus()
     call_deferred("_show_virtual_keyboard")
@@ -461,9 +468,13 @@ func _show_npc_response(npc: CharacterBody3D, response: String) -> void:
     last_npc_response = response
     prompt.text = "%s replied" % npc.get_meta("display_name")
     _append_chat_line(str(npc.get_meta("display_name")), response)
-    var mode_note := " | OFFLINE scripted dialogue (no real AI model configured)"
-    if llm_client != null and llm_client.is_configured():
-        mode_note = " | AI endpoint configured; response may fall back offline if request fails"
+    var mode_note := " | OFFLINE scripted dialogue — no model reply used"
+    if last_reply_used_remote_ai:
+        mode_note = " | REAL MODEL RESPONSE received"
+    elif llm_client != null and llm_client.is_configured():
+        mode_note = " | AI configured, but this reply used offline fallback"
+    if not last_ai_error.is_empty():
+        mode_note += " | AI error: " + last_ai_error.left(100)
     status_label.text = "%s | intent: %s | action: %s | memory: %s%s" % [
         npc.get_meta("display_name"),
         npc.get_meta("last_intent", "conversation"),

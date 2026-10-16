@@ -368,6 +368,16 @@ func _build_ai_setup() -> void:
     if layer == null:
         layer = get_child(0) as CanvasLayer
 
+    # Keep the setup entry point visible on phone-sized screens.
+    grok_setup_button = Button.new()
+    grok_setup_button.name = "GrokSetupButton"
+    grok_setup_button.text = "GROK AI SETUP"
+    grok_setup_button.size = Vector2(180.0, 54.0)
+    grok_setup_button.add_theme_font_size_override("font_size", 18)
+    grok_setup_button.pressed.connect(_open_ai_setup)
+    layer.add_child(grok_setup_button)
+    _layout_ui()
+
     # Use an in-game overlay instead of AcceptDialog: Android touch input in
     # modal dialogs can fail to focus LineEdit controls on some devices.
     ai_setup_dialog = Control.new()

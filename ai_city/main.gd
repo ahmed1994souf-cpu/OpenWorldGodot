@@ -346,7 +346,7 @@ func _build_ai_setup() -> void:
 
     ai_setup_dialog = AcceptDialog.new()
     ai_setup_dialog.title = "Connect NPCs to Grok"
-    ai_setup_dialog.dialog_text = "Enter your xAI API key once. It is saved in this device's private game storage."
+    ai_setup_dialog.dialog_text = "Grok 4.6 is preselected. Paste your xAI API key; it stays in this device's private game storage."
     ai_setup_dialog.size = Vector2i(650, 420)
     layer.add_child(ai_setup_dialog)
     var fields := VBoxContainer.new()
@@ -472,8 +472,8 @@ func _send_message() -> void:
     if llm_client == null or not llm_client.is_configured():
         last_ai_error = "No AI model configured"
         prompt.text = "AI is not connected"
-        _append_chat_line("SYSTEM", "لم يُرسل رد من الشخصية لأن نموذج الذكاء الاصطناعي غير مضبوط. افتح AI SETUP وأدخل عنوان الخدمة واسم النموذج.")
-        status_label.text = "AI NOT CONNECTED — no NPC reply generated. Configure AI SETUP."
+        _append_chat_line("SYSTEM", "لم يصل Grok بعد: افتح GROK AI SETUP وأدخل مفتاح xAI صالحًا. عنوان Grok واسم النموذج مضبوطان تلقائيًا.")
+        status_label.text = "GROK NOT CONNECTED — add a valid xAI API key in GROK AI SETUP."
         chat_input.grab_focus()
         call_deferred("_show_virtual_keyboard")
         return

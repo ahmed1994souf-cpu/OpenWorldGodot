@@ -393,17 +393,14 @@ func _build_ai_setup() -> void:
     fields.add_theme_constant_override("separation", 10)
     fields_scroll.add_child(fields)
 
-    ai_endpoint_input = _make_ai_setup_field("GrokEndpointInput", "API endpoint", "https://api.x.ai/v1/chat/completions")
+    ai_endpoint_input = _make_ai_setup_field(fields, "GrokEndpointInput", "API endpoint", "https://api.x.ai/v1/chat/completions")
     ai_endpoint_input.text = "https://api.x.ai/v1/chat/completions"
-    fields.add_child(ai_endpoint_input)
 
-    ai_model_input = _make_ai_setup_field("GrokModelInput", "Model name", "grok-4.6")
+    ai_model_input = _make_ai_setup_field(fields, "GrokModelInput", "Model name", "grok-4.6")
     ai_model_input.text = "grok-4.6"
-    fields.add_child(ai_model_input)
 
-    ai_key_input = _make_ai_setup_field("GrokApiKeyInput", "xAI API key", "Tap here, then paste your xAI key")
+    ai_key_input = _make_ai_setup_field(fields, "GrokApiKeyInput", "xAI API key", "Tap here, then paste your xAI key")
     ai_key_input.secret = true
-    fields.add_child(ai_key_input)
 
     var key_actions := HBoxContainer.new()
     key_actions.add_theme_constant_override("separation", 8)
@@ -439,13 +436,11 @@ func _build_ai_setup() -> void:
     close_button.pressed.connect(_close_ai_setup)
     bottom_actions.add_child(close_button)
 
-func _make_ai_setup_field(field_name: String, label_text: String, placeholder: String) -> LineEdit:
-    var wrapper := VBoxContainer.new()
-    wrapper.add_theme_constant_override("separation", 4)
+func _make_ai_setup_field(parent: VBoxContainer, field_name: String, label_text: String, placeholder: String) -> LineEdit:
     var field_label := Label.new()
     field_label.text = label_text
     field_label.add_theme_font_size_override("font_size", 16)
-    wrapper.add_child(field_label)
+    parent.add_child(field_label)
 
     var edit := LineEdit.new()
     edit.name = field_name
@@ -465,21 +460,8 @@ func _make_ai_setup_field(field_name: String, label_text: String, placeholder: S
             edit.grab_focus()
             call_deferred("_show_ai_virtual_keyboard", edit)
     )
-    wrapper.add_child(edit)
-    # Return the field itself while keeping a visible label above it.
-    # The wrapper is attached by the caller to keep labels and fields together.
-    fields_container_workaround(edit, wrapper)
+    parent.add_child(edit)
     return edit
-
-func fields_container_workaround(edit: LineEdit, wrapper: VBoxContainer) -> void:
-    # Reparenting is done by the setup builder; this helper intentionally keeps
-    # the label as a sibling in the same scrollable field list.
-    var parent := edit.get_parent()
-    if parent != null:
-        parent.remove_child(edit)
-        parent.remove_child(wrapper.get_child(0))
-        parent.add_child(wrapper)
-        wrapper.add_child(edit)
 
 func _toggle_ai_key_visibility() -> void:
     if ai_key_input == null:

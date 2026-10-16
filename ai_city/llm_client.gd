@@ -17,7 +17,7 @@ func _ready() -> void:
 	add_child(_request)
 	_request.request_completed.connect(_on_request_completed)
 
-const DEFAULT_ENDPOINT: String = "https://api.x.ai/v1/chat/completions"
+const DEFAULT_ENDPOINT: String = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 const DEFAULT_MODEL: String = "grok-4.6"
 
 func _load_config() -> void:

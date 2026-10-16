@@ -7,6 +7,9 @@ var status_label: Label
 var chat_input: LineEdit
 var chat_panel: PanelContainer
 var camera: Camera3D
+var llm_client: Node
+var pending_npc: CharacterBody3D
+var pending_user_text: String = ""
 var navigation_region: NavigationRegion3D
 
 func _ready() -> void:
@@ -14,6 +17,11 @@ func _ready() -> void:
     _build_navigation()
     _build_camera()
     _build_ui()
+    var llm_script: Script = load("res://ai_city/llm_client.gd") as Script
+    llm_client = llm_script.new()
+    llm_client.name = "LLMClient"
+    add_child(llm_client)
+    llm_client.completed.connect(_on_llm_completed)
 
 func _build_world() -> void:
     var env := WorldEnvironment.new()
@@ -229,14 +237,38 @@ func _send_message() -> void:
         return
     var text := chat_input.text.strip_edges()
     chat_input.clear()
-    var response: String = selected_npc.get_response(text)
+    pending_npc = selected_npc
+    pending_user_text = text
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
-    prompt.text = "%s: %s" % [selected_npc.get_meta("display_name"), response]
+    if llm_client != null and llm_client.is_configured():
+        prompt.text = "%s is thinking..." % selected_npc.get_meta("display_name")
+        var accepted: bool = llm_client.ask(selected_npc.build_ai_messages(text))
+        if accepted:
+            return
+        # If the request could not start, fall through to the local brain.
+    var response: String = selected_npc.get_response(text)
+    _show_npc_response(selected_npc, response)
+
+func _on_llm_completed(success: bool, result: Dictionary, error_message: String) -> void:
+    if pending_npc == null or not is_instance_valid(pending_npc):
+        return
+    var response: String
+    if success:
+        response = pending_npc.apply_remote_plan(pending_user_text, result)
+    else:
+        response = pending_npc.get_response(pending_user_text)
+        if not error_message.is_empty():
+            status_label.text = "AI fallback: " + error_message
+    _show_npc_response(pending_npc, response)
+
+func _show_npc_response(npc: CharacterBody3D, response: String) -> void:
+    var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
+    prompt.text = "%s: %s" % [npc.get_meta("display_name"), response]
     status_label.text = "%s | intent: %s | action: %s | memory: %s" % [
-        selected_npc.get_meta("display_name"),
-        selected_npc.get_meta("last_intent", "conversation"),
-        selected_npc.get_meta("last_action", "talk"),
-        str(selected_npc.get_meta("memory_size", 0))
+        npc.get_meta("display_name"),
+        npc.get_meta("last_intent", "conversation"),
+        npc.get_meta("last_action", "talk"),
+        str(npc.get_meta("memory_size", 0))
     ]
 
 func _process(delta: float) -> void:

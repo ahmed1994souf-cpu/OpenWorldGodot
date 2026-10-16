@@ -232,6 +232,11 @@ func _build_ui() -> void:
     send.custom_minimum_size = Vector2(100, 48)
     send.pressed.connect(_send_message)
     input_row.add_child(send)
+    var paste := Button.new()
+    paste.text = "Paste"
+    paste.custom_minimum_size = Vector2(90, 48)
+    paste.pressed.connect(_paste_clipboard)
+    input_row.add_child(paste)
 
     var voice_row := HBoxContainer.new()
     box.add_child(voice_row)
@@ -247,6 +252,7 @@ func _build_ui() -> void:
     voice_row.add_child(speak)
 
     chat_input.text_submitted.connect(func(_text: String): _send_message())
+    chat_input.focus_entered.connect(func(): call_deferred("_show_virtual_keyboard"))
     get_viewport().size_changed.connect(_layout_chat_panel)
     _layout_chat_panel()
 
@@ -270,10 +276,18 @@ func _open_voice_input() -> void:
     chat_panel.visible = true
     chat_input.placeholder_text = "Tap the microphone on your Android keyboard and speak…"
     chat_input.grab_focus()
-    call_deferred("_show_virtual_keyboard")
     _layout_chat_panel()
     call_deferred("_show_virtual_keyboard")
     status_label.text = "Voice input: tap the microphone icon on your keyboard, speak, then press Send."
+
+func _paste_clipboard() -> void:
+    var clip := DisplayServer.clipboard_get()
+    if not clip.is_empty():
+        chat_input.text += clip
+        chat_input.grab_focus()
+        call_deferred("_show_virtual_keyboard")
+    else:
+        status_label.text = "Clipboard is empty. Copy your text first."
 
 func _show_virtual_keyboard() -> void:
     if not is_instance_valid(chat_input):
@@ -375,6 +389,7 @@ func _talk_nearest() -> void:
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
     prompt.text = "%s (%s): I am listening. Ask naturally." % [nearest.get_meta("display_name"), nearest.get_meta("role")]
     chat_input.grab_focus()
+    call_deferred("_show_virtual_keyboard")
 
 func _send_message() -> void:
     if selected_npc == null or chat_input.text.strip_edges().is_empty():

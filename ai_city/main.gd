@@ -7,9 +7,11 @@ var status_label: Label
 var chat_input: LineEdit
 var chat_panel: PanelContainer
 var camera: Camera3D
+var navigation_region: NavigationRegion3D
 
 func _ready() -> void:
     _build_world()
+    _build_navigation()
     _build_camera()
     _build_ui()
 
@@ -57,15 +59,37 @@ func _build_world() -> void:
     player.set_meta("speed", 5.0)
 
     var npc_data := [
-        ["Samir", Vector3(-7.0, 1.0, 2.0), Color(0.85, 0.35, 0.25), "friendly shopkeeper"],
-        ["Nadia", Vector3(7.0, 1.0, -2.0), Color(0.75, 0.25, 0.65), "street photographer"],
-        ["Karim", Vector3(-3.0, 1.0, -9.0), Color(0.25, 0.70, 0.35), "taxi driver"],
-        ["Yacine", Vector3(4.0, 1.0, 10.0), Color(0.85, 0.70, 0.20), "security guard"]
+        ["Samir", Vector3(-7.0, 1.0, 2.0), Color(0.85, 0.35, 0.25), "friendly shopkeeper", "friendly"],
+        ["Nadia", Vector3(7.0, 1.0, -2.0), Color(0.75, 0.25, 0.65), "street photographer", "curious"],
+        ["Karim", Vector3(-3.0, 1.0, -9.0), Color(0.25, 0.70, 0.35), "taxi driver", "talkative"],
+        ["Yacine", Vector3(4.0, 1.0, 10.0), Color(0.85, 0.70, 0.20), "security guard", "serious"]
     ]
     for data in npc_data:
         var npc := _make_character(str(data[0]), data[1], data[2], false)
         npc.set_meta("role", str(data[3]))
+        npc.set_meta("personality", str(data[4]))
+        npc.set_meta("knowledge", ["central square", "main road", "nearby shops", "city streets"])
         npcs.append(npc)
+
+func _build_navigation() -> void:
+    navigation_region = NavigationRegion3D.new()
+    navigation_region.name = "CityNavigation"
+    navigation_region.position.y = 0.2
+
+    var nav_mesh := NavigationMesh.new()
+    nav_mesh.agent_radius = 0.5
+    nav_mesh.agent_height = 2.0
+    nav_mesh.cell_size = 0.25
+    nav_mesh.cell_height = 0.25
+    nav_mesh.vertices = PackedVector3Array([
+        Vector3(-20.0, 0.0, 14.0),
+        Vector3(20.0, 0.0, 14.0),
+        Vector3(20.0, 0.0, -14.0),
+        Vector3(-20.0, 0.0, -14.0)
+    ])
+    nav_mesh.add_polygon(PackedInt32Array([0, 1, 2, 3]))
+    navigation_region.navigation_mesh = nav_mesh
+    add_child(navigation_region)
 
 func _build_camera() -> void:
     var pivot := Node3D.new()
@@ -135,7 +159,7 @@ func _build_ui() -> void:
     add_child(layer)
     status_label = Label.new()
     status_label.position = Vector2(24, 20)
-    status_label.text = "AI CITY — Prototype 02\nTalk to a nearby NPC. Try: follow me / stop / hello / أين؟"
+    status_label.text = "AI CITY — Prototype 03\nReal NPC brain + memory + navigation"
     status_label.add_theme_font_size_override("font_size", 22)
     layer.add_child(status_label)
     var talk := Button.new()
@@ -174,7 +198,7 @@ func _build_ui() -> void:
     prompt.add_theme_font_size_override("font_size", 20)
     box.add_child(prompt)
     chat_input = LineEdit.new()
-    chat_input.placeholder_text = "Talk to the NPC..."
+    chat_input.placeholder_text = "Talk naturally to the NPC..."
     chat_input.add_theme_font_size_override("font_size", 20)
     box.add_child(chat_input)
     var send := Button.new()
@@ -197,7 +221,7 @@ func _talk_nearest() -> void:
     selected_npc = nearest
     chat_panel.visible = true
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
-    prompt.text = "%s (%s): What do you want to talk about?" % [nearest.get_meta("display_name"), nearest.get_meta("role")]
+    prompt.text = "%s (%s): I am listening. Ask naturally." % [nearest.get_meta("display_name"), nearest.get_meta("role")]
     chat_input.grab_focus()
 
 func _send_message() -> void:
@@ -208,7 +232,12 @@ func _send_message() -> void:
     var response: String = selected_npc.get_response(text)
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
     prompt.text = "%s: %s" % [selected_npc.get_meta("display_name"), response]
-    status_label.text = "%s is now in %s mode." % [selected_npc.get_meta("display_name"), selected_npc.behavior]
+    status_label.text = "%s | intent: %s | action: %s | memory: %s" % [
+        selected_npc.get_meta("display_name"),
+        selected_npc.get_meta("last_intent", "conversation"),
+        selected_npc.get_meta("last_action", "talk"),
+        str(selected_npc.get_meta("memory_size", 0))
+    ]
 
 func _process(delta: float) -> void:
     if player == null:

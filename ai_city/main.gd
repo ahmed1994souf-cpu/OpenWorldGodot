@@ -424,11 +424,15 @@ func _show_npc_response(npc: CharacterBody3D, response: String) -> void:
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
     last_npc_response = response
     prompt.text = "%s: %s" % [npc.get_meta("display_name"), response]
-    status_label.text = "%s | intent: %s | action: %s | memory: %s" % [
+    var mode_note := " | OFFLINE dialogue: configure a model in AI SETUP for open-ended intelligence"
+    if llm_client != null and llm_client.is_configured():
+        mode_note = " | Connected AI"
+    status_label.text = "%s | intent: %s | action: %s | memory: %s%s" % [
         npc.get_meta("display_name"),
         npc.get_meta("last_intent", "conversation"),
         npc.get_meta("last_action", "talk"),
-        str(npc.get_meta("memory_size", 0))
+        str(npc.get_meta("memory_size", 0)),
+        mode_note
     ]
 
 func _process(delta: float) -> void:

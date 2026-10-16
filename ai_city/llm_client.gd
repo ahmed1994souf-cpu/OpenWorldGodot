@@ -6,7 +6,7 @@ signal completed(success: bool, result: Dictionary, error_message: String)
 var endpoint: String = ""
 var api_key: String = ""
 var model: String = ""
-var timeout_seconds: float = 25.0
+var timeout_seconds: float = 90.0
 var _request: HTTPRequest
 var _active: bool = false
 
@@ -45,7 +45,8 @@ func save_config(new_endpoint: String, new_model: String, new_api_key: String) -
 	return config.save("user://ai_city_config.cfg")
 
 func is_configured() -> bool:
-	return not endpoint.is_empty() and not model.is_empty()
+	# A real xAI request needs the endpoint, model, and a user-provided key.
+	return not endpoint.is_empty() and not model.is_empty() and not api_key.strip_edges().is_empty()
 
 func ask(messages: Array) -> bool:
 	# Return false so the caller can use local fallback without processing the same message twice.
@@ -75,13 +76,20 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		completed.emit(false, {}, "AI provider returned invalid JSON.")
 		return
 	var choices = parsed.get("choices", [])
-	if choices.is_empty():
-		completed.emit(false, {}, "AI response did not include choices.")
+	if not choices is Array or choices.is_empty() or not choices[0] is Dictionary:
+		completed.emit(false, {}, "Grok response did not include choices. Check the selected model and API access.")
 		return
-	var message: Dictionary = choices[0].get("message", {})
-	var content := str(message.get("content", ""))
+	var message = choices[0].get("message", {})
+	if not message is Dictionary:
+		completed.emit(false, {}, "Grok response had an invalid message object.")
+		return
+	var content := str(message.get("content", "")).strip_edges()
+	if content.is_empty():
+		completed.emit(false, {}, "Grok returned an empty message.")
+		return
 	var plan = JSON.parse_string(content)
 	if plan is Dictionary:
 		completed.emit(true, plan, "")
 	else:
-		completed.emit(true, {"reply": content, "action": "none", "goal": ""}, "")
+		# Treat plain model text as a real answer, never a canned fallback.
+		completed.emit(true, {"reply": content, "action": "none", "intent": "conversation", "goal": ""}, "")

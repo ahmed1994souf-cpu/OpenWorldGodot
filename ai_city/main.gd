@@ -15,6 +15,8 @@ var ai_endpoint_input: LineEdit
 var ai_model_input: LineEdit
 var ai_key_input: LineEdit
 var navigation_region: NavigationRegion3D
+var last_npc_response: String = ""
+var chat_panel_base_y: float = 500.0
 
 func _ready() -> void:
     _build_world()
@@ -169,12 +171,14 @@ func _make_character(n: String, pos: Vector3, color: Color, is_player: bool) -> 
 
 func _build_ui() -> void:
     var layer := CanvasLayer.new()
+    layer.name = "CanvasLayer"
     add_child(layer)
     status_label = Label.new()
     status_label.position = Vector2(24, 20)
-    status_label.text = "AI CITY — Prototype 03\nReal NPC brain + memory + navigation"
+    status_label.text = "AI CITY — Prototype 03\nNPC conversations + memory"
     status_label.add_theme_font_size_override("font_size", 22)
     layer.add_child(status_label)
+
     var talk := Button.new()
     talk.text = "TALK"
     talk.position = Vector2(1040, 600)
@@ -199,26 +203,102 @@ func _build_ui() -> void:
 
     chat_panel = PanelContainer.new()
     chat_panel.position = Vector2(250, 500)
-    chat_panel.size = Vector2(760, 150)
+    chat_panel.size = Vector2(760, 170)
     chat_panel.visible = false
     layer.add_child(chat_panel)
     var box := VBoxContainer.new()
+    box.add_theme_constant_override("separation", 6)
     chat_panel.add_child(box)
+
     var prompt := Label.new()
     prompt.name = "Prompt"
     prompt.text = ""
     prompt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-    prompt.add_theme_font_size_override("font_size", 20)
+    prompt.add_theme_font_size_override("font_size", 18)
     box.add_child(prompt)
+
+    var input_row := HBoxContainer.new()
+    box.add_child(input_row)
     chat_input = LineEdit.new()
-    chat_input.placeholder_text = "Talk naturally to the NPC..."
+    chat_input.name = "ChatInput"
+    chat_input.placeholder_text = "Tap here to type, paste, or use your keyboard microphone…"
+    chat_input.virtual_keyboard_enabled = true
+    chat_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     chat_input.add_theme_font_size_override("font_size", 20)
-    box.add_child(chat_input)
+    input_row.add_child(chat_input)
+
     var send := Button.new()
     send.text = "Send"
+    send.custom_minimum_size = Vector2(100, 48)
     send.pressed.connect(_send_message)
-    box.add_child(send)
+    input_row.add_child(send)
+
+    var voice_row := HBoxContainer.new()
+    box.add_child(voice_row)
+    var dictate := Button.new()
+    dictate.text = "🎙 Dictate (keyboard mic)"
+    dictate.custom_minimum_size = Vector2(240, 42)
+    dictate.pressed.connect(_open_voice_input)
+    voice_row.add_child(dictate)
+    var speak := Button.new()
+    speak.text = "🔊 Speak reply"
+    speak.custom_minimum_size = Vector2(190, 42)
+    speak.pressed.connect(_speak_last_response)
+    voice_row.add_child(speak)
+
     chat_input.text_submitted.connect(func(_text: String): _send_message())
+    get_viewport().size_changed.connect(_layout_chat_panel)
+    _layout_chat_panel()
+
+func _layout_chat_panel() -> void:
+    if chat_panel == null:
+        return
+    var view_size := get_viewport().get_visible_rect().size
+    var keyboard_height := float(DisplayServer.virtual_keyboard_get_height())
+    chat_panel.size = Vector2(minf(760.0, view_size.x - 24.0), 176.0)
+    chat_panel.position.x = maxf(12.0, (view_size.x - chat_panel.size.x) * 0.5)
+    if keyboard_height > 0.0:
+        chat_panel.position.y = maxf(12.0, view_size.y - keyboard_height - chat_panel.size.y - 12.0)
+    else:
+        chat_panel.position.y = maxf(80.0, view_size.y - chat_panel.size.y - 24.0)
+
+func _open_voice_input() -> void:
+    if selected_npc == null:
+        _talk_nearest()
+        if selected_npc == null:
+            return
+    chat_panel.visible = true
+    chat_input.placeholder_text = "Tap the microphone on your Android keyboard and speak…"
+    chat_input.grab_focus()
+    call_deferred("_show_virtual_keyboard")
+    _layout_chat_panel()
+    call_deferred("_show_virtual_keyboard")
+    status_label.text = "Voice input: tap the microphone icon on your keyboard, speak, then press Send."
+
+func _show_virtual_keyboard() -> void:
+    if not is_instance_valid(chat_input):
+        return
+    var rect := Rect2i(Vector2i(chat_input.global_position), Vector2i(chat_input.size))
+    DisplayServer.virtual_keyboard_show(chat_input.text, rect)
+
+func _speak_last_response() -> void:
+    if DisplayServer.tts_is_speaking():
+        DisplayServer.tts_stop()
+        return
+    if last_npc_response.strip_edges().is_empty():
+        status_label.text = "Talk to an NPC first to get a reply to read aloud."
+        return
+    var voices: Array[Dictionary] = DisplayServer.tts_get_voices()
+    if voices.is_empty():
+        status_label.text = "System text-to-speech is unavailable. Enable/install speech voices in Android settings."
+        return
+    var voice_id := str(voices[0].get("id", ""))
+    for voice in voices:
+        var language := str(voice.get("language", "")).to_lower()
+        if language.begins_with("ar"):
+            voice_id = str(voice.get("id", voice_id))
+            break
+    DisplayServer.tts_speak(last_npc_response, voice_id, 100, 1.0, 1, 1, true)
 
 
 func _build_ai_setup() -> void:
@@ -291,6 +371,7 @@ func _talk_nearest() -> void:
         return
     selected_npc = nearest
     chat_panel.visible = true
+    _layout_chat_panel()
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
     prompt.text = "%s (%s): I am listening. Ask naturally." % [nearest.get_meta("display_name"), nearest.get_meta("role")]
     chat_input.grab_focus()
@@ -326,6 +407,7 @@ func _on_llm_completed(success: bool, result: Dictionary, error_message: String)
 
 func _show_npc_response(npc: CharacterBody3D, response: String) -> void:
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
+    last_npc_response = response
     prompt.text = "%s: %s" % [npc.get_meta("display_name"), response]
     status_label.text = "%s | intent: %s | action: %s | memory: %s" % [
         npc.get_meta("display_name"),
@@ -337,6 +419,8 @@ func _show_npc_response(npc: CharacterBody3D, response: String) -> void:
 func _process(delta: float) -> void:
     if player == null:
         return
+    if chat_panel != null and chat_panel.visible:
+        _layout_chat_panel()
     var pivot: Node3D = camera.get_meta("pivot")
     pivot.global_position = pivot.global_position.lerp(player.global_position + Vector3(0.0, 1.0, 0.0), delta * 6.0)
     for npc in npcs:

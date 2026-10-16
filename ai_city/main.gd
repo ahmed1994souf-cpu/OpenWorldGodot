@@ -16,7 +16,9 @@ var camera: Camera3D
 var llm_client: Node
 var pending_npc: CharacterBody3D
 var pending_user_text: String = ""
-var ai_setup_dialog: AcceptDialog
+var ai_setup_dialog: Control
+var ai_setup_panel: PanelContainer
+var ai_key_visibility_button: Button
 var ai_endpoint_input: LineEdit
 var ai_model_input: LineEdit
 var ai_key_input: LineEdit
@@ -337,79 +339,200 @@ func _build_ai_setup() -> void:
     var layer: CanvasLayer = get_node_or_null("CanvasLayer")
     if layer == null:
         layer = get_child(0) as CanvasLayer
-    var setup_button := Button.new()
-    setup_button.text = "GROK AI SETUP"
-    setup_button.position = Vector2(1040, 520)
-    setup_button.size = Vector2(180, 58)
-    setup_button.pressed.connect(_open_ai_setup)
-    layer.add_child(setup_button)
 
-    ai_setup_dialog = AcceptDialog.new()
-    ai_setup_dialog.title = "Connect NPCs to Grok"
-    ai_setup_dialog.dialog_text = "Grok 4.6 is preselected. Paste your xAI API key; it stays in this device's private game storage."
-    ai_setup_dialog.size = Vector2i(650, 420)
+    # Use an in-game overlay instead of AcceptDialog: Android touch input in
+    # modal dialogs can fail to focus LineEdit controls on some devices.
+    ai_setup_dialog = Control.new()
+    ai_setup_dialog.name = "GrokSetupOverlay"
+    ai_setup_dialog.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    ai_setup_dialog.mouse_filter = Control.MOUSE_FILTER_STOP
+    ai_setup_dialog.visible = false
     layer.add_child(ai_setup_dialog)
-    var fields := VBoxContainer.new()
-    fields.add_theme_constant_override("separation", 12)
-    ai_setup_dialog.add_child(fields)
 
-    ai_endpoint_input = LineEdit.new()
-    ai_endpoint_input.name = "GrokEndpointInput"
+    var backdrop := ColorRect.new()
+    backdrop.color = Color(0.015, 0.025, 0.045, 0.92)
+    backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+    backdrop.mouse_filter = Control.MOUSE_FILTER_STOP
+    ai_setup_dialog.add_child(backdrop)
+
+    ai_setup_panel = PanelContainer.new()
+    ai_setup_panel.name = "GrokSetupPanel"
+    ai_setup_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+    ai_setup_dialog.add_child(ai_setup_panel)
+
+    var margins := MarginContainer.new()
+    margins.add_theme_constant_override("margin_left", 16)
+    margins.add_theme_constant_override("margin_right", 16)
+    margins.add_theme_constant_override("margin_top", 14)
+    margins.add_theme_constant_override("margin_bottom", 14)
+    ai_setup_panel.add_child(margins)
+
+    var content := VBoxContainer.new()
+    content.add_theme_constant_override("separation", 10)
+    margins.add_child(content)
+
+    var heading := Label.new()
+    heading.text = "CONNECT NPCs TO GROK"
+    heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+    heading.add_theme_font_size_override("font_size", 22)
+    content.add_child(heading)
+
+    var hint := Label.new()
+    hint.text = "Tap a field to open the phone keyboard. You can also use Paste."
+    hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+    content.add_child(hint)
+
+    var fields_scroll := ScrollContainer.new()
+    fields_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    fields_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    fields_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+    content.add_child(fields_scroll)
+
+    var fields := VBoxContainer.new()
+    fields.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    fields.add_theme_constant_override("separation", 10)
+    fields_scroll.add_child(fields)
+
+    ai_endpoint_input = _make_ai_setup_field("GrokEndpointInput", "API endpoint", "https://api.x.ai/v1/chat/completions")
     ai_endpoint_input.text = "https://api.x.ai/v1/chat/completions"
-    ai_endpoint_input.placeholder_text = "Grok API endpoint"
-    ai_endpoint_input.virtual_keyboard_enabled = true
-    ai_endpoint_input.custom_minimum_size.y = 54
-    ai_endpoint_input.focus_entered.connect(func(): call_deferred("_show_ai_virtual_keyboard", ai_endpoint_input))
     fields.add_child(ai_endpoint_input)
 
-    ai_model_input = LineEdit.new()
-    ai_model_input.name = "GrokModelInput"
+    ai_model_input = _make_ai_setup_field("GrokModelInput", "Model name", "grok-4.6")
     ai_model_input.text = "grok-4.6"
-    ai_model_input.placeholder_text = "Model (grok-4.6)"
-    ai_model_input.virtual_keyboard_enabled = true
-    ai_model_input.custom_minimum_size.y = 54
-    ai_model_input.focus_entered.connect(func(): call_deferred("_show_ai_virtual_keyboard", ai_model_input))
     fields.add_child(ai_model_input)
 
-    ai_key_input = LineEdit.new()
-    ai_key_input.name = "GrokApiKeyInput"
-    ai_key_input.placeholder_text = "Paste xAI API key here"
+    ai_key_input = _make_ai_setup_field("GrokApiKeyInput", "xAI API key", "Tap here, then paste your xAI key")
     ai_key_input.secret = true
-    ai_key_input.virtual_keyboard_enabled = true
-    ai_key_input.custom_minimum_size.y = 58
-    ai_key_input.focus_entered.connect(func(): call_deferred("_show_ai_virtual_keyboard", ai_key_input))
     fields.add_child(ai_key_input)
 
+    var key_actions := HBoxContainer.new()
+    key_actions.add_theme_constant_override("separation", 8)
+    content.add_child(key_actions)
+
+    ai_key_visibility_button = Button.new()
+    ai_key_visibility_button.text = "Show key"
+    ai_key_visibility_button.custom_minimum_size = Vector2(120, 50)
+    ai_key_visibility_button.pressed.connect(_toggle_ai_key_visibility)
+    key_actions.add_child(ai_key_visibility_button)
+
+    var paste_button := Button.new()
+    paste_button.text = "PASTE KEY"
+    paste_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    paste_button.custom_minimum_size = Vector2(0, 50)
+    paste_button.pressed.connect(_paste_ai_key)
+    key_actions.add_child(paste_button)
+
+    var bottom_actions := HBoxContainer.new()
+    bottom_actions.add_theme_constant_override("separation", 8)
+    content.add_child(bottom_actions)
+
     var save_button := Button.new()
-    save_button.text = "Save Grok Settings"
-    save_button.custom_minimum_size.y = 54
+    save_button.text = "SAVE SETTINGS"
+    save_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    save_button.custom_minimum_size = Vector2(0, 54)
     save_button.pressed.connect(_save_ai_setup)
-    fields.add_child(save_button)
+    bottom_actions.add_child(save_button)
+
+    var close_button := Button.new()
+    close_button.text = "CLOSE"
+    close_button.custom_minimum_size = Vector2(100, 54)
+    close_button.pressed.connect(_close_ai_setup)
+    bottom_actions.add_child(close_button)
+
+func _make_ai_setup_field(field_name: String, label_text: String, placeholder: String) -> LineEdit:
+    var wrapper := VBoxContainer.new()
+    wrapper.add_theme_constant_override("separation", 4)
+    var field_label := Label.new()
+    field_label.text = label_text
+    field_label.add_theme_font_size_override("font_size", 16)
+    wrapper.add_child(field_label)
+
+    var edit := LineEdit.new()
+    edit.name = field_name
+    edit.placeholder_text = placeholder
+    edit.virtual_keyboard_enabled = true
+    edit.focus_mode = Control.FOCUS_ALL
+    edit.mouse_filter = Control.MOUSE_FILTER_STOP
+    edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    edit.custom_minimum_size = Vector2(0, 58)
+    edit.add_theme_font_size_override("font_size", 18)
+    edit.focus_entered.connect(func(): call_deferred("_show_ai_virtual_keyboard", edit))
+    edit.gui_input.connect(func(event: InputEvent):
+        if event is InputEventScreenTouch and event.pressed:
+            edit.grab_focus()
+            call_deferred("_show_ai_virtual_keyboard", edit)
+        elif event is InputEventMouseButton and event.pressed:
+            edit.grab_focus()
+            call_deferred("_show_ai_virtual_keyboard", edit)
+    )
+    wrapper.add_child(edit)
+    # Return the field itself while keeping a visible label above it.
+    # The wrapper is attached by the caller to keep labels and fields together.
+    fields_container_workaround(edit, wrapper)
+    return edit
+
+func fields_container_workaround(edit: LineEdit, wrapper: VBoxContainer) -> void:
+    # Reparenting is done by the setup builder; this helper intentionally keeps
+    # the label as a sibling in the same scrollable field list.
+    var parent := edit.get_parent()
+    if parent != null:
+        parent.remove_child(edit)
+        parent.remove_child(wrapper.get_child(0))
+        parent.add_child(wrapper)
+        wrapper.add_child(edit)
+
+func _toggle_ai_key_visibility() -> void:
+    if ai_key_input == null:
+        return
+    ai_key_input.secret = not ai_key_input.secret
+    ai_key_visibility_button.text = "Show key" if ai_key_input.secret else "Hide key"
+    ai_key_input.grab_focus()
+    call_deferred("_show_ai_virtual_keyboard", ai_key_input)
+
+func _paste_ai_key() -> void:
+    var clip := DisplayServer.clipboard_get()
+    if clip.is_empty():
+        status_label.text = "Clipboard is empty. Copy the xAI key first, then tap PASTE KEY."
+        return
+    ai_key_input.text = clip.strip_edges()
+    ai_key_input.caret_column = ai_key_input.text.length()
+    ai_key_input.grab_focus()
+    status_label.text = "Key pasted into the field. Tap SAVE SETTINGS."
+    call_deferred("_show_ai_virtual_keyboard", ai_key_input)
 
 func _show_ai_virtual_keyboard(edit: LineEdit) -> void:
-    if not is_instance_valid(edit) or not edit.is_inside_tree():
+    if not is_instance_valid(edit) or not edit.is_inside_tree() or not ai_setup_dialog.visible:
         return
     edit.grab_focus()
     var rect := Rect2i(Vector2i(edit.global_position), Vector2i(edit.size))
     DisplayServer.virtual_keyboard_show(edit.text, rect)
+    call_deferred("_layout_grok_setup")
 
 func _open_ai_setup() -> void:
     if llm_client != null:
         ai_endpoint_input.text = str(llm_client.endpoint) if not str(llm_client.endpoint).is_empty() else "https://api.x.ai/v1/chat/completions"
         ai_model_input.text = str(llm_client.model) if not str(llm_client.model).is_empty() else "grok-4.6"
         ai_key_input.text = str(llm_client.api_key)
-    ai_setup_dialog.popup_centered()
-    call_deferred("_layout_grok_setup")
+    ai_setup_dialog.visible = true
+    _layout_grok_setup()
 
 func _layout_grok_setup() -> void:
-    if ai_setup_dialog == null:
+    if ai_setup_dialog == null or not ai_setup_dialog.visible or ai_setup_panel == null:
         return
     var view_size := get_viewport().get_visible_rect().size
-    ai_setup_dialog.size = Vector2i(int(minf(650.0, view_size.x - 28.0)), int(minf(420.0, view_size.y - 40.0)))
-    ai_setup_dialog.popup_centered()
-    ai_endpoint_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    ai_model_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-    ai_key_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    var keyboard_height := float(DisplayServer.virtual_keyboard_get_height())
+    var available_height := view_size.y - keyboard_height - 16.0 if keyboard_height > 0.0 else view_size.y - 24.0
+    var panel_width := minf(680.0, view_size.x - 20.0)
+    var panel_height := minf(560.0, available_height)
+    panel_height = maxf(220.0, panel_height)
+    ai_setup_panel.size = Vector2(panel_width, panel_height)
+    ai_setup_panel.position.x = maxf(10.0, (view_size.x - panel_width) * 0.5)
+    ai_setup_panel.position.y = maxf(8.0, (view_size.y - keyboard_height - panel_height) * 0.5) if keyboard_height > 0.0 else maxf(12.0, (view_size.y - panel_height) * 0.5)
+
+func _close_ai_setup() -> void:
+    DisplayServer.virtual_keyboard_hide()
+    if ai_setup_dialog != null:
+        ai_setup_dialog.hide()
 
 func _save_ai_setup() -> void:
     var endpoint := ai_endpoint_input.text.strip_edges()
@@ -419,22 +542,21 @@ func _save_ai_setup() -> void:
     if model_name.is_empty():
         model_name = "grok-4.6"
     if ai_key_input.text.strip_edges().is_empty():
-        status_label.text = "Grok API key is empty. Paste your xAI key before saving."
+        status_label.text = "Grok API key is empty. Tap the key field or PASTE KEY before saving."
         ai_key_input.grab_focus()
         call_deferred("_show_ai_virtual_keyboard", ai_key_input)
         return
-    var save_error: int = llm_client.save_config(endpoint, model_name, ai_key_input.text)
+    var save_error: int = llm_client.save_config(endpoint, model_name, ai_key_input.text.strip_edges())
     if save_error == OK:
         status_label.text = "Grok settings saved privately on this device."
-        ai_setup_dialog.hide()
-        DisplayServer.virtual_keyboard_hide()
+        _close_ai_setup()
     else:
         status_label.text = "Could not save Grok settings (error %s)." % save_error
 
 func _use_local_brain() -> void:
     llm_client.save_config("", "", "")
     status_label.text = "Offline NPC brain enabled."
-    ai_setup_dialog.hide()
+    _close_ai_setup()
 
 func _talk_nearest() -> void:
     var nearest: CharacterBody3D = null
@@ -552,6 +674,8 @@ func _process(delta: float) -> void:
         return
     if chat_panel != null and chat_panel.visible:
         _layout_chat_panel()
+    if ai_setup_dialog != null and ai_setup_dialog.visible:
+        _layout_grok_setup()
     var pivot: Node3D = camera.get_meta("pivot")
     pivot.global_position = pivot.global_position.lerp(player.global_position + Vector3(0.0, 1.0, 0.0), delta * 6.0)
     for npc in npcs:

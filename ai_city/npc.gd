@@ -156,21 +156,21 @@ func _apply_brain_action(action: String) -> void:
             behavior = "talk"
 
 func build_ai_messages(user_text: String) -> Array:
-	var world: Dictionary = {
-		"player_distance": last_player_distance,
-		"npc_position": str(global_position),
-		"player_position": str(player.global_position) if player != null else str(global_position),
-		"behavior": behavior,
-		"city_time": Time.get_time_string_from_system()
-	}
-	return brain.build_messages(user_text, world)
+    var world: Dictionary = {
+        "player_distance": last_player_distance,
+        "npc_position": str(global_position),
+        "player_position": str(player.global_position) if player != null else str(global_position),
+        "behavior": behavior,
+        "city_time": Time.get_time_string_from_system()
+    }
+    return brain.build_messages(user_text, world)
 
 func apply_remote_plan(user_text: String, plan: Dictionary) -> String:
-	if not brain_ready:
-		return ""
-	var result: Dictionary = brain.accept_remote_plan(user_text, plan)
-	_apply_brain_action(str(result.get("action", "none")))
-	set_meta("last_intent", str(result.get("intent", "conversation")))
-	set_meta("last_action", str(result.get("action", "none")))
-	set_meta("memory_size", int(result.get("memory_size", 0)))
-	return str(result.get("response", ""))
+    if not brain_ready:
+        return ""
+    var result: Dictionary = brain.accept_remote_plan(user_text, plan)
+    _apply_brain_action(str(result.get("action", "none")))
+    set_meta("last_intent", str(result.get("intent", "conversation")))
+    set_meta("last_action", str(result.get("action", "none")))
+    set_meta("memory_size", int(result.get("memory_size", 0)))
+    return str(result.get("response", ""))

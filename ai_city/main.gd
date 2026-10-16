@@ -25,6 +25,9 @@ var ai_key_input: LineEdit
 var navigation_region: NavigationRegion3D
 var last_npc_response: String = ""
 var chat_panel_base_y: float = 500.0
+var talk_button: Button
+var grok_setup_button: Button
+var movement_buttons: Array[Button] = []
 
 func _ready() -> void:
     _build_world()
@@ -187,13 +190,12 @@ func _build_ui() -> void:
     status_label.add_theme_font_size_override("font_size", 22)
     layer.add_child(status_label)
 
-    var talk := Button.new()
-    talk.text = "TALK"
-    talk.position = Vector2(1040, 600)
-    talk.size = Vector2(180, 70)
-    talk.add_theme_font_size_override("font_size", 28)
-    talk.pressed.connect(_talk_nearest)
-    layer.add_child(talk)
+    talk_button = Button.new()
+    talk_button.text = "TALK"
+    talk_button.size = Vector2(150, 58)
+    talk_button.add_theme_font_size_override("font_size", 24)
+    talk_button.pressed.connect(_talk_nearest)
+    layer.add_child(talk_button)
 
     var controls := [
         ["◀", Vector2(35, 610), "ui_left"], ["▶", Vector2(155, 610), "ui_right"],
@@ -207,6 +209,7 @@ func _build_ui() -> void:
         b.add_theme_font_size_override("font_size", 26)
         b.button_down.connect(func(): Input.action_press(item[2]))
         b.button_up.connect(func(): Input.action_release(item[2]))
+        movement_buttons.append(b)
         layer.add_child(b)
 
     chat_panel = PanelContainer.new()
@@ -273,8 +276,33 @@ func _build_ui() -> void:
 
     chat_input.text_submitted.connect(func(_text: String): _send_message())
     chat_input.focus_entered.connect(func(): call_deferred("_show_virtual_keyboard"))
+    get_viewport().size_changed.connect(_layout_ui)
     get_viewport().size_changed.connect(_layout_chat_panel)
+    _layout_ui()
     _layout_chat_panel()
+
+func _layout_ui() -> void:
+    var view_size := get_viewport().get_visible_rect().size
+    if talk_button != null:
+        talk_button.position = Vector2(maxf(12.0, view_size.x - talk_button.size.x - 14.0), maxf(12.0, view_size.y - talk_button.size.y - 24.0))
+    if grok_setup_button != null:
+        grok_setup_button.position = Vector2(maxf(12.0, view_size.x - grok_setup_button.size.x - 14.0), 72.0)
+    if status_label != null:
+        status_label.position = Vector2(12.0, 10.0)
+        status_label.size = Vector2(maxf(180.0, view_size.x - 24.0), 54.0)
+        status_label.add_theme_font_size_override("font_size", 16)
+    var button_size := Vector2(58.0, 50.0)
+    var left := 14.0
+    var bottom := maxf(12.0, view_size.y - button_size.y - 22.0)
+    var positions := [
+        Vector2(left, bottom - button_size.y - 8.0),
+        Vector2(left + button_size.x + 8.0, bottom - button_size.y - 8.0),
+        Vector2(left + (button_size.x + 8.0) * 0.5, bottom - (button_size.y + 8.0) * 2.0),
+        Vector2(left + (button_size.x + 8.0) * 0.5, bottom)
+    ]
+    for i in range(mini(movement_buttons.size(), positions.size())):
+        movement_buttons[i].size = button_size
+        movement_buttons[i].position = positions[i]
 
 func _layout_chat_panel() -> void:
     if chat_panel == null:

@@ -338,52 +338,98 @@ func _build_ai_setup() -> void:
     if layer == null:
         layer = get_child(0) as CanvasLayer
     var setup_button := Button.new()
-    setup_button.text = "AI SETUP"
+    setup_button.text = "GROK AI SETUP"
     setup_button.position = Vector2(1040, 520)
     setup_button.size = Vector2(180, 58)
     setup_button.pressed.connect(_open_ai_setup)
     layer.add_child(setup_button)
 
     ai_setup_dialog = AcceptDialog.new()
-    ai_setup_dialog.title = "Connect NPC AI"
-    ai_setup_dialog.dialog_text = "OpenAI-compatible chat endpoint. Saved privately on this device."
-    ai_setup_dialog.size = Vector2i(650, 360)
+    ai_setup_dialog.title = "Connect NPCs to Grok"
+    ai_setup_dialog.dialog_text = "Enter your xAI API key once. It is saved in this device's private game storage."
+    ai_setup_dialog.size = Vector2i(650, 420)
     layer.add_child(ai_setup_dialog)
     var fields := VBoxContainer.new()
+    fields.add_theme_constant_override("separation", 12)
     ai_setup_dialog.add_child(fields)
+
     ai_endpoint_input = LineEdit.new()
-    ai_endpoint_input.placeholder_text = "Endpoint URL (include /v1/chat/completions)"
+    ai_endpoint_input.name = "GrokEndpointInput"
+    ai_endpoint_input.text = "https://api.x.ai/v1/chat/completions"
+    ai_endpoint_input.placeholder_text = "Grok API endpoint"
+    ai_endpoint_input.virtual_keyboard_enabled = true
+    ai_endpoint_input.custom_minimum_size.y = 54
+    ai_endpoint_input.focus_entered.connect(func(): call_deferred("_show_ai_virtual_keyboard", ai_endpoint_input))
     fields.add_child(ai_endpoint_input)
+
     ai_model_input = LineEdit.new()
-    ai_model_input.placeholder_text = "Model name"
+    ai_model_input.name = "GrokModelInput"
+    ai_model_input.text = "grok-4.6"
+    ai_model_input.placeholder_text = "Model (grok-4.6)"
+    ai_model_input.virtual_keyboard_enabled = true
+    ai_model_input.custom_minimum_size.y = 54
+    ai_model_input.focus_entered.connect(func(): call_deferred("_show_ai_virtual_keyboard", ai_model_input))
     fields.add_child(ai_model_input)
+
     ai_key_input = LineEdit.new()
-    ai_key_input.placeholder_text = "API key (optional for local providers)"
+    ai_key_input.name = "GrokApiKeyInput"
+    ai_key_input.placeholder_text = "Paste xAI API key here"
     ai_key_input.secret = true
+    ai_key_input.virtual_keyboard_enabled = true
+    ai_key_input.custom_minimum_size.y = 58
+    ai_key_input.focus_entered.connect(func(): call_deferred("_show_ai_virtual_keyboard", ai_key_input))
     fields.add_child(ai_key_input)
+
     var save_button := Button.new()
-    save_button.text = "Save AI Settings"
+    save_button.text = "Save Grok Settings"
+    save_button.custom_minimum_size.y = 54
     save_button.pressed.connect(_save_ai_setup)
     fields.add_child(save_button)
-    var local_button := Button.new()
-    local_button.text = "Use Offline NPC Brain"
-    local_button.pressed.connect(_use_local_brain)
-    fields.add_child(local_button)
+
+func _show_ai_virtual_keyboard(edit: LineEdit) -> void:
+    if not is_instance_valid(edit) or not edit.is_inside_tree():
+        return
+    edit.grab_focus()
+    var rect := Rect2i(Vector2i(edit.global_position), Vector2i(edit.size))
+    DisplayServer.virtual_keyboard_show(edit.text, rect)
 
 func _open_ai_setup() -> void:
     if llm_client != null:
-        ai_endpoint_input.text = str(llm_client.endpoint)
-        ai_model_input.text = str(llm_client.model)
+        ai_endpoint_input.text = str(llm_client.endpoint) if not str(llm_client.endpoint).is_empty() else "https://api.x.ai/v1/chat/completions"
+        ai_model_input.text = str(llm_client.model) if not str(llm_client.model).is_empty() else "grok-4.6"
         ai_key_input.text = str(llm_client.api_key)
     ai_setup_dialog.popup_centered()
+    call_deferred("_layout_grok_setup")
+
+func _layout_grok_setup() -> void:
+    if ai_setup_dialog == null:
+        return
+    var view_size := get_viewport().get_visible_rect().size
+    ai_setup_dialog.size = Vector2i(int(minf(650.0, view_size.x - 28.0)), int(minf(420.0, view_size.y - 40.0)))
+    ai_setup_dialog.popup_centered()
+    ai_endpoint_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    ai_model_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    ai_key_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 
 func _save_ai_setup() -> void:
-    var save_error: int = llm_client.save_config(ai_endpoint_input.text, ai_model_input.text, ai_key_input.text)
+    var endpoint := ai_endpoint_input.text.strip_edges()
+    var model_name := ai_model_input.text.strip_edges()
+    if endpoint.is_empty():
+        endpoint = "https://api.x.ai/v1/chat/completions"
+    if model_name.is_empty():
+        model_name = "grok-4.6"
+    if ai_key_input.text.strip_edges().is_empty():
+        status_label.text = "Grok API key is empty. Paste your xAI key before saving."
+        ai_key_input.grab_focus()
+        call_deferred("_show_ai_virtual_keyboard", ai_key_input)
+        return
+    var save_error: int = llm_client.save_config(endpoint, model_name, ai_key_input.text)
     if save_error == OK:
-        status_label.text = "AI settings saved on this device."
+        status_label.text = "Grok settings saved privately on this device."
         ai_setup_dialog.hide()
+        DisplayServer.virtual_keyboard_hide()
     else:
-        status_label.text = "Could not save AI settings (error %s)." % save_error
+        status_label.text = "Could not save Grok settings (error %s)." % save_error
 
 func _use_local_brain() -> void:
     llm_client.save_config("", "", "")

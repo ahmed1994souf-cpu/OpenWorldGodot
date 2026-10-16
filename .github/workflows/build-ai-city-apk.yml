@@ -1,0 +1,125 @@
+name: Build AI City Android APK
+
+on:
+  push:
+    branches:
+      - ai-city-prototype
+    paths:
+      - "ai_city/**"
+      - "project.godot"
+      - "export_presets.cfg"
+      - ".github/workflows/build-ai-city-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    name: Export and smoke-test AI City
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout project
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0" "ndk;28.2.13676358"
+
+      - name: Download Godot 4.7.2
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip" \
+            -o /tmp/godot.zip
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          GODOT_BIN="$(find /tmp/godot -maxdepth 2 -type f -name 'Godot_v4.7.2-stable_linux.x86_64' | head -n 1)"
+          test -n "$GODOT_BIN"
+          chmod +x "$GODOT_BIN"
+          echo "GODOT_BIN=$GODOT_BIN" >> "$GITHUB_ENV"
+          "$GODOT_BIN" --version
+
+      - name: Install matching Android export templates
+        run: |
+          curl --fail --location --retry 3 \
+            "https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz" \
+            -o /tmp/godot-templates.tpz
+          mkdir -p /tmp/godot-templates
+          unzip -q /tmp/godot-templates.tpz -d /tmp/godot-templates
+          mkdir -p "$HOME/.local/share/godot/export_templates/4.7.2.stable"
+          if [ -d /tmp/godot-templates/templates ]; then
+            cp -a /tmp/godot-templates/templates/. "$HOME/.local/share/godot/export_templates/4.7.2.stable/"
+          else
+            find /tmp/godot-templates -maxdepth 2 -type f -print
+            exit 1
+          fi
+          test -f "$HOME/.local/share/godot/export_templates/4.7.2.stable/android_debug.apk"
+          test -f "$HOME/.local/share/godot/export_templates/4.7.2.stable/android_release.apk"
+
+      - name: Configure Android paths for headless export
+        run: |
+          mkdir -p "$HOME/.config/godot"
+          cat > "$HOME/.config/godot/editor_settings-4.tres" <<EOF
+          [gd_resource type="EditorSettings" format=3]
+
+          [resource]
+          export/android/android_sdk_path = "$ANDROID_HOME"
+          export/android/java_sdk_path = "$JAVA_HOME"
+          EOF
+
+      - name: Import project and validate scripts
+        shell: bash
+        run: |
+          set -o pipefail
+          "$GODOT_BIN" --headless --editor --path . --quit 2>&1 | tee godot-import.log
+          if grep -E "SCRIPT ERROR|Parse Error|Failed to load script|ERROR: Cannot open file" godot-import.log; then
+            echo "Godot reported a script/import error."
+            exit 1
+          fi
+
+      - name: Smoke-test main scene
+        shell: bash
+        run: |
+          set -o pipefail
+          "$GODOT_BIN" --headless --path . --quit-after 8 2>&1 | tee godot-smoke-test.log
+          if grep -E "SCRIPT ERROR|Parse Error|Failed to load script|ERROR: Cannot open file" godot-smoke-test.log; then
+            echo "Godot main-scene smoke test reported an error."
+            exit 1
+          fi
+
+      - name: Export Android APK
+        run: |
+          mkdir -p build
+          "$GODOT_BIN" --headless --path . --export-debug "Android" build/AI-City.apk
+          test -s build/AI-City.apk
+          file build/AI-City.apk
+          unzip -l build/AI-City.apk | grep -E "AndroidManifest.xml|lib/arm64-v8a" | head -n 20
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-City-Android-APK
+          path: build/AI-City.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Godot test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-City-Godot-Logs
+          path: |
+            godot-import.log
+            godot-smoke-test.log
+          if-no-files-found: ignore
+          retention-days: 14

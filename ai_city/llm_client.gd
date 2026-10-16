@@ -77,7 +77,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
 		return
 	var choices = parsed.get("choices", [])
 	if not choices is Array or choices.is_empty() or not choices[0] is Dictionary:
-		completed.emit(false, {}, "Grok response did not include choices. Check the selected model and API access.")
+		completed.emit(false, {}, "AI response did not include choices. Check the selected model and API access.")
 		return
 	var message = choices[0].get("message", {})
 	if not message is Dictionary:

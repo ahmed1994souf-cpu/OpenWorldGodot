@@ -6,6 +6,10 @@ var selected_npc: CharacterBody3D
 var status_label: Label
 var chat_input: LineEdit
 var chat_panel: PanelContainer
+var chat_history_label: RichTextLabel
+var send_button: Button
+var chat_history_text: String = ""
+var is_waiting_for_reply: bool = false
 var camera: Camera3D
 var llm_client: Node
 var pending_npc: CharacterBody3D
@@ -203,7 +207,7 @@ func _build_ui() -> void:
 
     chat_panel = PanelContainer.new()
     chat_panel.position = Vector2(250, 500)
-    chat_panel.size = Vector2(760, 170)
+    chat_panel.size = Vector2(760, 280)
     chat_panel.visible = false
     layer.add_child(chat_panel)
     var box := VBoxContainer.new()
@@ -217,21 +221,33 @@ func _build_ui() -> void:
     prompt.add_theme_font_size_override("font_size", 18)
     box.add_child(prompt)
 
+    chat_history_label = RichTextLabel.new()
+    chat_history_label.name = "ConversationHistory"
+    chat_history_label.bbcode_enabled = false
+    chat_history_label.scroll_active = true
+    chat_history_label.fit_content = false
+    chat_history_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+    chat_history_label.size_flags_vertical = Control.SIZE_EXPAND_FILL
+    chat_history_label.custom_minimum_size = Vector2(0, 92)
+    chat_history_label.text = "Conversation starts here. Type a message and press Enter, or tap Send."
+    box.add_child(chat_history_label)
+
     var input_row := HBoxContainer.new()
     box.add_child(input_row)
     chat_input = LineEdit.new()
     chat_input.name = "ChatInput"
     chat_input.placeholder_text = "Tap here to type, paste, or use your keyboard microphone…"
     chat_input.virtual_keyboard_enabled = true
+    chat_input.keep_editing_on_text_submit = true
     chat_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
     chat_input.add_theme_font_size_override("font_size", 20)
     input_row.add_child(chat_input)
 
-    var send := Button.new()
-    send.text = "Send"
-    send.custom_minimum_size = Vector2(100, 48)
-    send.pressed.connect(_send_message)
-    input_row.add_child(send)
+    send_button = Button.new()
+    send_button.text = "Send"
+    send_button.custom_minimum_size = Vector2(100, 48)
+    send_button.pressed.connect(_send_message)
+    input_row.add_child(send_button)
     var paste := Button.new()
     paste.text = "Paste"
     paste.custom_minimum_size = Vector2(90, 48)
@@ -261,7 +277,7 @@ func _layout_chat_panel() -> void:
         return
     var view_size := get_viewport().get_visible_rect().size
     var keyboard_height := float(DisplayServer.virtual_keyboard_get_height())
-    chat_panel.size = Vector2(minf(760.0, view_size.x - 24.0), 176.0)
+    chat_panel.size = Vector2(minf(760.0, view_size.x - 24.0), minf(280.0, view_size.y * 0.62))
     chat_panel.position.x = maxf(12.0, (view_size.x - chat_panel.size.x) * 0.5)
     if keyboard_height > 0.0:
         chat_panel.position.y = maxf(12.0, view_size.y - keyboard_height - chat_panel.size.y - 12.0)
@@ -383,32 +399,50 @@ func _talk_nearest() -> void:
     if nearest == null:
         status_label.text = "No NPC close enough. Walk closer to a capsule."
         return
+    if selected_npc != nearest:
+        chat_history_text = ""
+        chat_history_label.text = ""
     selected_npc = nearest
     chat_panel.visible = true
     _layout_chat_panel()
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
-    prompt.text = "%s (%s): I am listening. Ask naturally." % [nearest.get_meta("display_name"), nearest.get_meta("role")]
+    prompt.text = "Talking to %s (%s). Press Enter to send; replies appear here." % [nearest.get_meta("display_name"), nearest.get_meta("role")]
     chat_input.grab_focus()
     call_deferred("_show_virtual_keyboard")
 
 func _send_message() -> void:
-    if selected_npc == null or chat_input.text.strip_edges().is_empty():
+    if selected_npc == null or is_waiting_for_reply or chat_input.text.strip_edges().is_empty():
         return
     var text := chat_input.text.strip_edges()
     chat_input.clear()
+    _append_chat_line("You", text)
     pending_npc = selected_npc
     pending_user_text = text
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
     if llm_client != null and llm_client.is_configured():
-        prompt.text = "%s is thinking..." % selected_npc.get_meta("display_name")
+        is_waiting_for_reply = true
+        if send_button != null:
+            send_button.disabled = true
+            send_button.text = "…"
+        prompt.text = "%s is thinking…" % selected_npc.get_meta("display_name")
         var accepted: bool = llm_client.ask(selected_npc.build_ai_messages(text))
         if accepted:
             return
-        # If the request could not start, fall through to the local brain.
+        is_waiting_for_reply = false
+        if send_button != null:
+            send_button.disabled = false
+            send_button.text = "Send"
+        # If the request could not start, use the local brain once.
     var response: String = selected_npc.get_response(text)
     _show_npc_response(selected_npc, response)
+    chat_input.grab_focus()
+    call_deferred("_show_virtual_keyboard")
 
 func _on_llm_completed(success: bool, result: Dictionary, error_message: String) -> void:
+    is_waiting_for_reply = false
+    if send_button != null:
+        send_button.disabled = false
+        send_button.text = "Send"
     if pending_npc == null or not is_instance_valid(pending_npc):
         return
     var response: String
@@ -417,16 +451,19 @@ func _on_llm_completed(success: bool, result: Dictionary, error_message: String)
     else:
         response = pending_npc.get_response(pending_user_text)
         if not error_message.is_empty():
-            status_label.text = "AI fallback: " + error_message
+            status_label.text = "AI request failed; used offline dialogue: " + error_message
     _show_npc_response(pending_npc, response)
+    chat_input.grab_focus()
+    call_deferred("_show_virtual_keyboard")
 
 func _show_npc_response(npc: CharacterBody3D, response: String) -> void:
     var prompt: Label = chat_panel.get_node("VBoxContainer/Prompt")
     last_npc_response = response
-    prompt.text = "%s: %s" % [npc.get_meta("display_name"), response]
-    var mode_note := " | OFFLINE dialogue: configure a model in AI SETUP for open-ended intelligence"
+    prompt.text = "%s replied" % npc.get_meta("display_name")
+    _append_chat_line(str(npc.get_meta("display_name")), response)
+    var mode_note := " | OFFLINE scripted dialogue (no real AI model configured)"
     if llm_client != null and llm_client.is_configured():
-        mode_note = " | Connected AI"
+        mode_note = " | AI endpoint configured; response may fall back offline if request fails"
     status_label.text = "%s | intent: %s | action: %s | memory: %s%s" % [
         npc.get_meta("display_name"),
         npc.get_meta("last_intent", "conversation"),
@@ -434,6 +471,12 @@ func _show_npc_response(npc: CharacterBody3D, response: String) -> void:
         str(npc.get_meta("memory_size", 0)),
         mode_note
     ]
+
+func _append_chat_line(speaker: String, message: String) -> void:
+    var clean_message := message.replace("\r", " ").replace("\n", " ")
+    chat_history_text += "%s: %s\n\n" % [speaker, clean_message]
+    chat_history_label.text = chat_history_text
+    chat_history_label.scroll_to_line(maxi(0, chat_history_label.get_line_count() - 1))
 
 func _process(delta: float) -> void:
     if player == null:

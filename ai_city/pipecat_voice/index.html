@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI City — Voice NPC Test</title>
+<style>
+:root{color-scheme:dark}*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;background:radial-gradient(circle at top,#26364a,#0b1018 70%);color:#f3f5f7;font-family:system-ui,sans-serif;padding:20px}.panel{width:min(100%,440px);text-align:center;background:#111a25;border:1px solid #344357;border-radius:24px;padding:28px;box-shadow:0 24px 80px #0008}.avatar{font-size:56px;margin-bottom:8px}h1{font-size:25px;margin:8px 0}.sub{color:#aab8c9;font-size:14px;line-height:1.7}#status{min-height:48px;margin:24px 0 16px;color:#d4deea}button{border:0;border-radius:999px;padding:15px 24px;font-size:17px;font-weight:700;background:#4e8cff;color:white;min-width:190px}button.stop{background:#b54747}button:disabled{opacity:.55}#transcript{margin-top:22px;text-align:right;white-space:pre-wrap;overflow-wrap:anywhere;min-height:48px;color:#c8d5e5;font-size:14px}.small{font-size:12px;color:#8fa0b5;margin-top:22px}audio{display:none}
+</style>
+</head>
+<body>
+<main class="panel">
+<div class="avatar">🧙</div>
+<h1>شخصية من AI City</h1>
+<p class="sub">اختبار صوتي باستخدام Pipecat. اضغط اتصال، اسمح باستخدام الميكروفون، ثم تحدث بالعربية.</p>
+<div id="status">جاهز للاتصال</div>
+<button id="connect">🎙️ ابدأ المحادثة</button>
+<div id="transcript"></div>
+<p class="small">هذه صفحة اختبار للخادم الصوتي؛ ربط الصوت مباشرةً بشخصية Godot داخل اللعبة هو المرحلة التالية.</p>
+<audio id="remote" autoplay></audio>
+</main>
+<script>
+const statusEl=document.querySelector('#status'),button=document.querySelector('#connect'),audio=document.querySelector('#remote'),transcript=document.querySelector('#transcript');
+let pc=null,stream=null,connected=false,pending=[],canPatch=false;
+function status(s){statusEl.textContent=s}
+async function patchCandidate(c){await fetch('/api/offer',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({pc_id:pc.pc_id,candidates:[{candidate:c.candidate,sdp_mid:c.sdpMid,sdp_mline_index:c.sdpMLineIndex}]})})}
+async function connect(){
+ button.disabled=true;status('جارٍ طلب إذن الميكروفون…');
+ try{
+  stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
+  pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'}]});
+  pc.ontrack=e=>{audio.srcObject=e.streams[0];audio.play().catch(()=>{})};
+  stream.getAudioTracks().forEach(t=>pc.addTrack(t,stream));
+  pc.addTransceiver('video',{direction:'recvonly'});
+  pc.onicecandidate=async e=>{if(!e.candidate)return;if(canPatch&&pc.pc_id){try{await patchCandidate(e.candidate)}catch(err){console.warn(err)}}else pending.push(e.candidate)};
+  pc.onconnectionstatechange=()=>{if(pc.connectionState==='connected')status('متصل — تحدث الآن');else if(['failed','disconnected','closed'].includes(pc.connectionState))status('انقطع الاتصال')};
+  await pc.setLocalDescription(await pc.createOffer());
+  const res=await fetch('/api/offer',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sdp:pc.localDescription.sdp,type:pc.localDescription.type})});
+  if(!res.ok)throw new Error('تعذّر بدء جلسة Pipecat: HTTP '+res.status);
+  const answer=await res.json();pc.pc_id=answer.pc_id;await pc.setRemoteDescription(answer);canPatch=true;
+  for(const c of pending)await patchCandidate(c);pending=[];
+  connected=true;button.textContent='⏹ إنهاء المحادثة';button.classList.add('stop');button.disabled=false;status('تم الاتصال، تحدث مع الشخصية');
+ }catch(e){console.error(e);status('خطأ: '+e.message);disconnect();button.disabled=false}
+}
+function disconnect(){if(pc){pc.close();pc=null}if(stream){stream.getTracks().forEach(t=>t.stop());stream=null}audio.srcObject=null;connected=false;canPatch=false;pending=[];button.textContent='🎙️ ابدأ المحادثة';button.classList.remove('stop')}
+button.addEventListener('click',()=>{if(connected){disconnect();status('تم إنهاء المحادثة')}else connect()});
+</script>
+</body>
+</html>

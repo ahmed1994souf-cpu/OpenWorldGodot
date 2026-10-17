@@ -117,7 +117,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
     _active = false
     var raw := body.get_string_from_utf8()
     if result != HTTPRequest.RESULT_SUCCESS:
-        completed.emit(false, {}, "Network request failed (result %s). Check Android INTERNET permission and connection.")
+        completed.emit(false, {}, "Network request failed (result %s). Check Android INTERNET permission and connection." % result)
         return
     if response_code < 200 or response_code >= 300:
         completed.emit(false, {}, "AI server HTTP %s: %s" % [response_code, raw.left(500)])

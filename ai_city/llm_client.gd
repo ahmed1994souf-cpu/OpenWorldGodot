@@ -214,10 +214,10 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
             _horde_polling = false
             completed.emit(false, {}, "AI Horde status HTTP %s: %s" % [response_code, raw.left(700)])
             return
-        var done := bool(parsed.get("done", false))
-        var faulted := bool(parsed.get("faulted", false))
-        var status_generations = parsed.get("generations", [])
-        var generation_count := status_generations.size() if status_generations is Array else -1
+        var done: bool = bool(parsed.get("done", false))
+        var faulted: bool = bool(parsed.get("faulted", false))
+        var status_generations: Variant = parsed.get("generations", [])
+        var generation_count: int = status_generations.size() if status_generations is Array else -1
         print("[LLM] Horde status done=", done, " faulted=", faulted, " wait_time=", parsed.get("wait_time", -1), " queue_position=", parsed.get("queue_position", -1), " generations=", generation_count)
         if faulted:
             _active = false
@@ -237,8 +237,6 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
             completed.emit(false, {}, "AI Horde finished without text: %s" % raw.left(700))
             return
 
-        # Horde workers may return natural language even when the prompt asks for JSON.
-        # Use JSON.new().parse() so malformed/non-JSON model output is handled quietly.
         var parsed_generation := JSON.new()
         var parse_error := parsed_generation.parse(content)
         if parse_error == OK and parsed_generation.data is Dictionary:

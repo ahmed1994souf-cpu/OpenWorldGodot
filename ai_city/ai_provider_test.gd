@@ -42,7 +42,8 @@ func _init() -> void:
         return
 
     # AI Horde is volunteer-powered and can queue before a worker accepts the job.
-    var deadline := Time.get_ticks_msec() + 145000
+    # Allow enough time for the anonymous queue while keeping the CI test bounded.
+    var deadline := Time.get_ticks_msec() + 240000
     while not _done and Time.get_ticks_msec() < deadline:
         await process_frame
 

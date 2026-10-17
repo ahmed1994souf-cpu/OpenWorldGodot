@@ -168,6 +168,7 @@ func _schedule_horde_poll() -> void:
         return
     var headers := PackedStringArray(["Accept: application/json", "apikey: " + (api_key if not api_key.is_empty() else HORDE_ANONYMOUS_KEY), "Client-Agent: AI-City-Godot/1.0"])
     var url := HORDE_STATUS.replace("{id}", _horde_request_id)
+    print("[LLM] Horde poll id=", _horde_request_id, " remaining_ms=", _horde_deadline_ms - Time.get_ticks_msec())
     var err := _request.request(url, headers, HTTPClient.METHOD_GET)
     if err != OK:
         _active = false
@@ -214,6 +215,15 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
             completed.emit(false, {}, "AI Horde status HTTP %s: %s" % [response_code, raw.left(700)])
             return
         var done := bool(parsed.get("done", false))
+        var faulted := bool(parsed.get("faulted", false))
+        var status_generations = parsed.get("generations", [])
+        var generation_count := status_generations.size() if status_generations is Array else -1
+        print("[LLM] Horde status done=", done, " faulted=", faulted, " wait_time=", parsed.get("wait_time", -1), " queue_position=", parsed.get("queue_position", -1), " generations=", generation_count)
+        if faulted:
+            _active = false
+            _horde_polling = false
+            completed.emit(false, {}, "AI Horde worker faulted while generating. Try again.")
+            return
         if not done:
             _schedule_horde_poll()
             return

@@ -7,7 +7,15 @@ const HORDE_BASE := "https://stablehorde.net/api/v2"
 const HORDE_ENDPOINT := HORDE_BASE + "/generate/text/async"
 const HORDE_STATUS := HORDE_BASE + "/generate/text/status/{id}"
 const HORDE_ANONYMOUS_KEY := "0000000000"
-const HORDE_MODEL := "koboldcpp/Qwen3VL-8B-Instruct-Q4_K_M"
+# Prefer several currently common text models so the anonymous queue can use
+# whichever matching worker is available instead of getting stuck behind one model.
+const HORDE_MODELS := [
+    "koboldcpp/Fimbulvetr-11B-v2",
+    "koboldcpp/Llama-3-Lumimaid-8B-v0.1",
+    "koboldcpp/Qwen_Qwen3-1.7B-Q4_K_M",
+    "koboldcpp/Qwen3-0.6B"
+]
+const HORDE_MODEL := HORDE_MODELS[0]
 const GEMINI_ENDPOINT := "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 const GEMINI_MODEL := "gemini-2.5-flash"
 const OLD_GEMINI_ENDPOINT := "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
@@ -41,14 +49,20 @@ func _load_config() -> void:
     _normalize_config()
 
 func _normalize_config() -> void:
+    # Old builds saved Gemini settings. Do not let a stale/placeholder key
+    # silently disable the free provider on the phone.
     if endpoint.is_empty() or endpoint == OLD_GEMINI_ENDPOINT or endpoint.contains("aihorde.net/api/v2"):
         endpoint = HORDE_ENDPOINT
         api_key = HORDE_ANONYMOUS_KEY
         model = ""
     elif _is_horde():
         endpoint = HORDE_ENDPOINT
-        if api_key.is_empty():
+        if api_key.is_empty() or api_key == "0000000000":
             api_key = HORDE_ANONYMOUS_KEY
+        model = ""
+    elif _is_native_gemini() and (api_key.is_empty() or api_key == HORDE_ANONYMOUS_KEY or api_key == "unused"):
+        endpoint = HORDE_ENDPOINT
+        api_key = HORDE_ANONYMOUS_KEY
         model = ""
     elif model.is_empty():
         model = GEMINI_MODEL
@@ -115,12 +129,12 @@ func ask(messages: Array) -> bool:
 
     if _is_horde():
         headers.append("apikey: " + (api_key if not api_key.is_empty() else HORDE_ANONYMOUS_KEY))
-        headers.append("Client-Agent: AI-City-Godot/1.1")
+        headers.append("Client-Agent: AI-City-Godot/1.2")
         payload = {
             "prompt": _build_horde_prompt(messages),
             "params": {
                 "n": 1,
-                "max_length": 192,
+                "max_length": 128,
                 "max_context_length": 2048,
                 "temperature": 0.7,
                 "top_p": 0.9,
@@ -128,11 +142,11 @@ func ask(messages: Array) -> bool:
                 "frmtrmblln": true,
                 "frmttriminc": true
             },
-            "models": [HORDE_MODEL],
+            "models": HORDE_MODELS,
             "trusted_workers": false
         }
         request_url = HORDE_ENDPOINT
-        print("[LLM] Horde model=", HORDE_MODEL)
+        print("[LLM] Horde models=", HORDE_MODELS)
     elif _is_native_gemini():
         headers.append("x-goog-api-key: " + api_key)
         var contents: Array = []
@@ -173,7 +187,7 @@ func _schedule_horde_poll() -> void:
         _horde_polling = false
         completed.emit(false, {}, "Free AI worker did not answer before the timeout. Try Send again.")
         return
-    var headers := PackedStringArray(["Accept: application/json", "apikey: " + (api_key if not api_key.is_empty() else HORDE_ANONYMOUS_KEY), "Client-Agent: AI-City-Godot/1.1"])
+    var headers := PackedStringArray(["Accept: application/json", "apikey: " + (api_key if not api_key.is_empty() else HORDE_ANONYMOUS_KEY), "Client-Agent: AI-City-Godot/1.2"])
     var url := HORDE_STATUS.replace("{id}", _horde_request_id)
     print("[LLM] Horde poll id=", _horde_request_id, " remaining_ms=", _horde_deadline_ms - Time.get_ticks_msec())
     var err := _request.request(url, headers, HTTPClient.METHOD_GET)

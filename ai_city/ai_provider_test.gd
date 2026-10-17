@@ -1,5 +1,17 @@
 extends SceneTree
 
+var _done := false
+var _success := false
+var _result_data: Dictionary = {}
+var _error_message := ""
+
+func _on_completed(ok: bool, result: Dictionary, err: String) -> void:
+    print("[AI TEST] completed signal received ok=", ok)
+    _success = ok
+    _result_data = result
+    _error_message = err
+    _done = true
+
 func _init() -> void:
     var client_script: Script = load("res://ai_city/llm_client.gd") as Script
     if client_script == null:
@@ -18,16 +30,7 @@ func _init() -> void:
         quit(3)
         return
 
-    var done := false
-    var success := false
-    var result_data: Dictionary = {}
-    var error_message := ""
-    client.completed.connect(func(ok: bool, result: Dictionary, err: String):
-        success = ok
-        result_data = result
-        error_message = err
-        done = true
-    )
+    client.completed.connect(_on_completed)
 
     var accepted: bool = client.ask([
         {"role": "system", "content": "Reply briefly in JSON with keys reply, action, intent, goal. The reply must be a natural NPC answer."},
@@ -38,23 +41,21 @@ func _init() -> void:
         quit(4)
         return
 
-    # AI Horde is volunteer-powered and can queue before a Scribe worker accepts the job.
-    # Allow longer than the client's 120-second Horde deadline so we test the actual provider,
-    # rather than failing the CI test while the provider is still legitimately processing.
+    # AI Horde is volunteer-powered and can queue before a worker accepts the job.
     var deadline := Time.get_ticks_msec() + 145000
-    while not done and Time.get_ticks_msec() < deadline:
+    while not _done and Time.get_ticks_msec() < deadline:
         await process_frame
 
-    if not done:
+    if not _done:
         print("[AI TEST] FAIL: timed out waiting for provider response")
         quit(5)
         return
 
-    if not success:
-        print("[AI TEST] FAIL: ", error_message)
+    if not _success:
+        print("[AI TEST] FAIL: ", _error_message)
         quit(6)
         return
 
-    print("[AI TEST] PASS: provider returned result=", result_data)
+    print("[AI TEST] PASS: provider returned result=", _result_data)
     print("AI_PROVIDER_TEST_SUCCESS")
     quit(0)

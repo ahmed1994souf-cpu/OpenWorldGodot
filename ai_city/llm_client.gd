@@ -226,9 +226,13 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
         if content.is_empty():
             completed.emit(false, {}, "AI Horde finished without text: %s" % raw.left(700))
             return
-        var plan = JSON.parse_string(content)
-        if plan is Dictionary:
-            completed.emit(true, plan, "")
+
+        # Horde workers may return natural language even when the prompt asks for JSON.
+        # Use JSON.new().parse() so malformed/non-JSON model output is handled quietly.
+        var parsed_generation := JSON.new()
+        var parse_error := parsed_generation.parse(content)
+        if parse_error == OK and parsed_generation.data is Dictionary:
+            completed.emit(true, parsed_generation.data, "")
         else:
             completed.emit(true, {"reply": content, "action": "none", "intent": "conversation", "goal": ""}, "")
         return
@@ -265,8 +269,9 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
     if content.is_empty():
         completed.emit(false, {}, "AI returned no text. Raw response: %s" % raw.left(700))
         return
-    var plan = JSON.parse_string(content)
-    if plan is Dictionary:
-        completed.emit(true, plan, "")
+    var parsed_generation := JSON.new()
+    var parse_error := parsed_generation.parse(content)
+    if parse_error == OK and parsed_generation.data is Dictionary:
+        completed.emit(true, parsed_generation.data, "")
     else:
         completed.emit(true, {"reply": content, "action": "none", "intent": "conversation", "goal": ""}, "")

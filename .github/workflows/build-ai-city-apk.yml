@@ -97,6 +97,12 @@ jobs:
             exit 1
           fi
 
+      - name: Test real keyless AI provider from Godot
+        shell: bash
+        run: |
+          set -o pipefail
+          "$GODOT_BIN" --headless --path . --script res://ai_city/ai_provider_test.gd 2>&1 | tee godot-ai-provider-test.log
+
       - name: Export Android APK
         run: |
           mkdir -p build
@@ -121,5 +127,6 @@ jobs:
           path: |
             godot-import.log
             godot-smoke-test.log
+            godot-ai-provider-test.log
           if-no-files-found: ignore
           retention-days: 14

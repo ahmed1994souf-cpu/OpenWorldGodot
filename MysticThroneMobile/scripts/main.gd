@@ -216,7 +216,9 @@ func _make_button(parent: Control, label_text: String, pos: Vector2, button_size
 
 func _on_joystick_input(event: InputEvent) -> void:
 	if event is InputEventScreenTouch:
-		if not event.pressed:
+		if event.pressed:
+			_update_joystick(event.position)
+		else:
 			joystick_vector = Vector2.ZERO
 			joystick_knob.position = Vector2(48, 48)
 	elif event is InputEventScreenDrag:

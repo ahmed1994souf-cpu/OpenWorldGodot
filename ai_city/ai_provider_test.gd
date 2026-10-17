@@ -38,7 +38,10 @@ func _init() -> void:
         quit(4)
         return
 
-    var deadline := Time.get_ticks_msec() + 50000
+    # AI Horde is volunteer-powered and can queue before a Scribe worker accepts the job.
+    # Allow longer than the client's 120-second Horde deadline so we test the actual provider,
+    # rather than failing the CI test while the provider is still legitimately processing.
+    var deadline := Time.get_ticks_msec() + 145000
     while not done and Time.get_ticks_msec() < deadline:
         await process_frame
 
@@ -53,4 +56,5 @@ func _init() -> void:
         return
 
     print("[AI TEST] PASS: provider returned result=", result_data)
+    print("AI_PROVIDER_TEST_SUCCESS")
     quit(0)

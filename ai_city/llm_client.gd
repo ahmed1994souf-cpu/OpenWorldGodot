@@ -12,6 +12,7 @@ var _active: bool = false
 
 const DEFAULT_ENDPOINT: String = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 const DEFAULT_MODEL: String = "gemini-2.5-flash"
+const OLD_GEMINI_ENDPOINT: String = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
 func _ready() -> void:
     _load_config()
@@ -29,7 +30,7 @@ func _load_config() -> void:
         endpoint = str(config.get_value("llm", "endpoint", DEFAULT_ENDPOINT)).strip_edges()
         api_key = str(config.get_value("llm", "api_key", "")).strip_edges()
         model = str(config.get_value("llm", "model", DEFAULT_MODEL)).strip_edges()
-    if endpoint.is_empty():
+    if endpoint.is_empty() or endpoint == OLD_GEMINI_ENDPOINT:
         endpoint = DEFAULT_ENDPOINT
     if model.is_empty():
         model = DEFAULT_MODEL
@@ -38,6 +39,8 @@ func save_config(new_endpoint: String, new_model: String, new_api_key: String) -
     endpoint = new_endpoint.strip_edges()
     model = new_model.strip_edges()
     api_key = new_api_key.strip_edges()
+    if endpoint.is_empty() or endpoint == OLD_GEMINI_ENDPOINT:
+        endpoint = DEFAULT_ENDPOINT
     var config := ConfigFile.new()
     config.set_value("llm", "endpoint", endpoint)
     config.set_value("llm", "model", model)
@@ -51,11 +54,7 @@ func _is_native_gemini() -> bool:
     return endpoint.contains("generativelanguage.googleapis.com") and endpoint.contains("generateContent")
 
 func _native_url() -> String:
-    var url := endpoint
-    url = url.replace("{model}", model)
-    if not url.contains("?"):
-        url += "?key=" + api_key.uri_encode()
-    return url
+    return endpoint.replace("{model}", model)
 
 func ask(messages: Array) -> bool:
     if _active or not is_configured():
@@ -118,7 +117,7 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
     _active = false
     var raw := body.get_string_from_utf8()
     if result != HTTPRequest.RESULT_SUCCESS:
-        completed.emit(false, {}, "Network request failed (result %s)." % result)
+        completed.emit(false, {}, "Network request failed (result %s). Check Android INTERNET permission and connection.")
         return
     if response_code < 200 or response_code >= 300:
         completed.emit(false, {}, "AI server HTTP %s: %s" % [response_code, raw.left(500)])
@@ -158,5 +157,4 @@ func _on_request_completed(result: int, response_code: int, _headers: PackedStri
     if plan is Dictionary:
         completed.emit(true, plan, "")
     else:
-        # Still allow a normal text answer if a provider ignores JSON mode.
         completed.emit(true, {"reply": content, "action": "none", "intent": "conversation", "goal": ""}, "")

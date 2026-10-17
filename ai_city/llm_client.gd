@@ -16,9 +16,7 @@ var _horde_deadline_ms: int = 0
 const HORDE_BASE: String = "https://stablehorde.net/api/v2"
 const HORDE_ENDPOINT: String = HORDE_BASE + "/generate/text/async"
 const HORDE_STATUS: String = HORDE_BASE + "/generate/text/status/{id}"
-const HORDE_MODELS: String = HORDE_BASE + "/status/models"
 const HORDE_ANONYMOUS_KEY: String = "0000000000"
-const HORDE_DEFAULT_MODEL: String = "koboldcpp/Kunoichi-DPO-v2-7B-Q8_0-imatrix"
 const GEMINI_ENDPOINT: String = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 const GEMINI_MODEL: String = "gemini-2.5-flash"
 const OLD_GEMINI_ENDPOINT: String = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
@@ -33,22 +31,19 @@ func _ready() -> void:
 func _load_config() -> void:
     endpoint = HORDE_ENDPOINT
     api_key = HORDE_ANONYMOUS_KEY
-    model = HORDE_DEFAULT_MODEL
+    model = ""
     var config := ConfigFile.new()
     if config.load("user://ai_city_config.cfg") == OK:
         endpoint = str(config.get_value("llm", "endpoint", HORDE_ENDPOINT)).strip_edges()
         api_key = str(config.get_value("llm", "api_key", HORDE_ANONYMOUS_KEY)).strip_edges()
-        model = str(config.get_value("llm", "model", HORDE_DEFAULT_MODEL)).strip_edges()
+        model = str(config.get_value("llm", "model", "")).strip_edges()
     if endpoint.is_empty() or endpoint == OLD_GEMINI_ENDPOINT or endpoint.contains("aihorde.net/api/v2"):
         endpoint = HORDE_ENDPOINT
         api_key = HORDE_ANONYMOUS_KEY
-        model = HORDE_DEFAULT_MODEL
-    if endpoint == HORDE_ENDPOINT:
-        if api_key.is_empty():
-            api_key = HORDE_ANONYMOUS_KEY
-        if model.is_empty():
-            model = HORDE_DEFAULT_MODEL
-    elif model.is_empty():
+        model = ""
+    if endpoint == HORDE_ENDPOINT and api_key.is_empty():
+        api_key = HORDE_ANONYMOUS_KEY
+    elif endpoint != HORDE_ENDPOINT and model.is_empty():
         model = GEMINI_MODEL
 
 func save_config(new_endpoint: String, new_model: String, new_api_key: String) -> Error:
@@ -57,11 +52,10 @@ func save_config(new_endpoint: String, new_model: String, new_api_key: String) -
     api_key = new_api_key.strip_edges()
     if endpoint.is_empty() or endpoint == OLD_GEMINI_ENDPOINT or endpoint.contains("aihorde.net/api/v2"):
         endpoint = HORDE_ENDPOINT
-        model = HORDE_DEFAULT_MODEL
+        model = ""
         api_key = HORDE_ANONYMOUS_KEY
     elif endpoint == HORDE_ENDPOINT:
-        if model.is_empty():
-            model = HORDE_DEFAULT_MODEL
+        model = ""
         if api_key.is_empty():
             api_key = HORDE_ANONYMOUS_KEY
     var config := ConfigFile.new()
@@ -71,11 +65,11 @@ func save_config(new_endpoint: String, new_model: String, new_api_key: String) -
     return config.save("user://ai_city_config.cfg")
 
 func use_keyless_horde() -> Error:
-    return save_config(HORDE_ENDPOINT, HORDE_DEFAULT_MODEL, HORDE_ANONYMOUS_KEY)
+    return save_config(HORDE_ENDPOINT, "", HORDE_ANONYMOUS_KEY)
 
 func is_configured() -> bool:
     if _is_horde():
-        return not model.is_empty()
+        return true
     return not endpoint.is_empty() and not model.is_empty() and not api_key.is_empty()
 
 func _is_horde() -> bool:
@@ -120,9 +114,7 @@ func ask(messages: Array) -> bool:
         headers.append("apikey: " + (api_key if not api_key.is_empty() else HORDE_ANONYMOUS_KEY))
         headers.append("Client-Agent: AI-City-Godot/1.0")
         payload = {
-            "apikey": (api_key if not api_key.is_empty() else HORDE_ANONYMOUS_KEY),
             "prompt": _build_horde_prompt(messages),
-            "models": [model],
             "params": {
                 "n": 1,
                 "max_length": 160,

@@ -37,3 +37,17 @@ The field at 0x08 may be size/count/offset-related, but its meaning is unknown. 
 - No verified FMO track/keyframe decoder exists in this project.
 - No GLB animation export has been implemented or validated.
 - Next step: inspect raw bytes between detected labels and compare candidate numeric blocks for the same bone across samples, without assuming label spans are records.
+
+## Focused inspection: `e_leg_l` in the two Suplex samples
+
+A later read-only byte dump around the literal label `e_leg_l` produced these observations:
+
+| File | Label offset | First 16 bytes after label |
+|---|---:|---|
+| `Z_F_SUPLEX_H_N.FMO` | `0x018C` | `00 00 00 00 00 00 0B 00 0D 00 0A 00 00 00 00 00` |
+| `Z_F_SUPLEX_H_Y.FMO` | `0x015C` | `00 00 00 00 00 00 07 00 0D 00 0A 00 00 00 00 00` |
+
+The displayed 16-byte label itself is followed by zero padding before the first nonzero small integers. The small-integer sequence differs at its first value (`0B 00` versus `07 00`), while `0D 00` and `0A 00` match. Farther after the label, the two files also show different binary values. Some 4-byte sequences can be interpreted as IEEE-754 floats, but this alone does not prove that they are transforms or animation values.
+
+These are byte-level observations only. The label boundary is not yet proven to be a record boundary, and the meaning of the integers, float candidates, and intervening zero bytes remains unknown. Do not use them as decoded keyframes or export them to a rig until cross-sample validation establishes their structure.
+

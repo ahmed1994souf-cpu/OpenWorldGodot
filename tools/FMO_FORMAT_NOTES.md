@@ -51,3 +51,18 @@ The displayed 16-byte label itself is followed by zero padding before the first 
 
 These are byte-level observations only. The label boundary is not yet proven to be a record boundary, and the meaning of the integers, float candidates, and intervening zero bytes remains unknown. Do not use them as decoded keyframes or export them to a rig until cross-sample validation establishes their structure.
 
+## Four-file comparison around shared bone labels
+
+A read-only dump of 40 bytes beginning 8 bytes before each detected label was supplied for all four samples. The following are direct observations:
+
+| File | Size | `o_body` | `n_waist_b` | `c_thigh_l` | `e_leg_l` |
+|---|---:|---:|---:|---:|---:|
+| `Z_F_SUPLEX_H_N.FMO` | 5576 | `0x0C` | `0xF4` | `0x140` | `0x18C` |
+| `Z_F_SUPLEX_H_Y.FMO` | 3692 | `0x0C` | `0xD0` | `0x110` | `0x15C` |
+| `Z_BELLY2BELLY_N.FMO` | 6784 | `0x0C` | `0x104` | `0x15C` | `0x1D8` |
+| `Z_BELLY2BELLY_Y.FMO` | 5076 | `0x0C` | `0x1C4` | `0x204` | `0x274` |
+
+The eight bytes immediately before `n_waist_b` and `c_thigh_l` are not consistent across all samples. The bytes after the labels also differ. At `o_body`, the 16-bit field at offset `0x08` is `0x0088`, `0x0077`, or `0x00D1`; the next 16-bit field at `0x0A` is `0x17`, `0x19`, or `0x18` in the supplied samples.
+
+These offsets and byte patterns are measured facts, not a decoded schema. In particular, neither header field is yet proven to be a frame count, bone count, or data length. This comparison still does not establish a safe animation/keyframe decoder or GLB exporter.
+

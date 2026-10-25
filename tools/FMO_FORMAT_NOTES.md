@@ -66,3 +66,13 @@ The eight bytes immediately before `n_waist_b` and `c_thigh_l` are not consisten
 
 These offsets and byte patterns are measured facts, not a decoded schema. In particular, neither header field is yet proven to be a frame count, bone count, or data length. This comparison still does not establish a safe animation/keyframe decoder or GLB exporter.
 
+## Extended comparison from `fmo_compare_fields.py`
+
+The supplied four-file output adds these cross-sample observations:
+
+- The labels `HAND_L`, `HAND_R`, `L_FOOT`, `R_FOOT`, `SHAPE_HANDLE_L`, `SHAPE_HANDLE_R`, `c_shoulder_l`, `c_shoulder_r`, `c_thigh_l`, `c_thigh_r`, `e_chest`, `e_hand_l`, `e_hand_r`, `e_leg_l`, `e_leg_r`, `e_neck`, `j_neck_a`, `n_chest`, `n_waist_b`, `o_body`, `o_sako_l`, `o_sako_r`, and `sub_body` were detected as shared label names in the four samples.
+- At several labels, three adjacent little-endian 16-bit values after the zero padding differ between samples. Examples: after `e_leg_l`, the triplets are `11,13,10`, `7,13,10`, `12,14,12`, and `8,13,7` in file order Suplex N, Suplex Y, Belly2Belly N, Belly2Belly Y. After `L_FOOT`, the triplets are `20,15,12`, `8,6,7`, `32,29,19`, and `16,14,11`.
+- The repeated byte sequence `CD CC CC 3E` / `CD CC CC 3F` occurs near the `SHAPE_HANDLE_L/R` labels and is consistent with float32 values 0.4 / 1.6 in little-endian interpretation. This is only a numeric interpretation of those bytes; their semantic meaning is unknown.
+- Some preceding four-byte values decode cleanly as float32 (for example, `CD CC CC 3F` = 1.6 and `CD CC CC 3E` = 0.4), while other four-byte patterns are non-floats or sentinel-like values. This mixed pattern warns against treating the whole area as a simple array of floats.
+
+These observations improve the map of candidate fields but still do not establish which values are animation keys, indices, flags, or static bone metadata. No decoder or GLB exporter should be claimed from this evidence alone.

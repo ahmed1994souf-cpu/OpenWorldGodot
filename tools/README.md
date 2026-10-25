@@ -25,3 +25,13 @@ The tool only reads the input files. It does not modify them.
 4. Only after the format is understood, implement and test GLB export.
 
 This is a reverse-engineering research prototype. Do not treat its output as a validated animation conversion.
+
+- `fmo_compare_fields.py`: read-only cross-file comparison of shared likely bone labels, nearby raw bytes, and raw little-endian 16-bit words. The printed words are not assigned meanings; repeated labels are listed individually.
+
+## Compare multiple samples
+
+```bash
+python tools/fmo_compare_fields.py /path/to/Z_F_SUPLEX_H_N.FMO /path/to/Z_F_SUPLEX_H_Y.FMO /path/to/Z_BELLY2BELLY_N.FMO /path/to/Z_BELLY2BELLY_Y.FMO
+```
+
+This is an exploratory aid only. Similar bytes or plausible numeric values do not prove a keyframe layout.

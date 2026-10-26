@@ -6,6 +6,7 @@ const CHARACTER_CANDIDATE_PATHS := [
 	"res://Jammo_LowPoly.fbx",
 ]
 const BODY_SLAM_PATH := "res://assets/animations/motifect/wrestling_body_slam.fbx"
+const PLAY_SOURCE_ANIMATION_ON_ITS_OWN_RIG := true
 
 func _ready() -> void:
 	print("\n=== Jammo + Motifect Body Slam inspection ===")
@@ -61,6 +62,12 @@ func _ready() -> void:
 				if animation == null:
 					continue
 				print("CLIP_INFO name=", animation_name, " length=", animation.length, " tracks=", animation.get_track_count())
+				# First practical test: play the clip on the exact skeleton it was authored for.
+				# This verifies source playback in Godot before attempting retargeting to Jammo.
+				if PLAY_SOURCE_ANIMATION_ON_ITS_OWN_RIG:
+					slam_player.root_node = slam_player.get_path_to(slam)
+					slam_player.play(animation_name)
+					print("SOURCE_RIG_PLAYBACK_STARTED=", animation_name)
 				for track_index in range(animation.get_track_count()):
 					print("CLIP_TRACK path=", animation.track_get_path(track_index), " type=", animation.track_get_type(track_index))
 	print("NOTE: This diagnostic inspects rigs and track paths; it does not claim the clip is retargeted onto Jammo.")

@@ -35,8 +35,22 @@ jobs:
           echo "Extracted $entry"
           ls -lh assets/animations/motifect/wrestling_body_slam.fbx
 
+      - name: Install Godot 4.7.2
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+
+      - name: Verify Godot executable
+        shell: bash
+        run: |
+          set -eu
+          echo "GODOT=${GODOT:-<unset>}"
+          command -v godot
+          godot --version
+
       - name: Import project and FBX assets with Godot
-        run: "$GODOT" --headless --path . --editor --import
+        run: godot --headless --path . --editor --import
 
       - name: Run isolated Jammo and Body Slam inspection
-        run: "$GODOT" --headless --path . wrestling_animation_test_fixed.tscn --quit-after 5
+        run: godot --headless --path . wrestling_animation_test_fixed.tscn --quit-after 5

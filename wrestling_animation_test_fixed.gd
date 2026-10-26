@@ -1,49 +1,61 @@
 extends Node3D
 
-# Separate test scene. This script does not modify the game's main scene.
-# It tries the submodule model path first, then the root-level FBX.
+# Isolated diagnostic only: does not change the game's main scene.
 const CHARACTER_CANDIDATE_PATHS := [
 	"res://assets/characters/jammo/Jammo-Character/Assets/Jammo-Character/Models/Jammo_LowPoly.fbx",
 	"res://Jammo_LowPoly.fbx",
 ]
+const BODY_SLAM_PATH := "res://assets/animations/motifect/wrestling_body_slam.fbx"
 
 func _ready() -> void:
-	print("\n=== Jammo wrestling rig test ===")
-	var model_path := ""
-	for candidate in CHARACTER_CANDIDATE_PATHS:
-		if ResourceLoader.exists(candidate):
-			model_path = candidate
-			break
-
-	if model_path.is_empty():
-		push_warning("Jammo FBX not found. Initialize the Jammo submodule or ensure Jammo_LowPoly.fbx is at the project root, then let Godot import it.")
-		return
-
-	print("Model path: ", model_path)
-	var packed_scene := load(model_path) as PackedScene
-	if packed_scene == null:
-		push_warning("Could not load Jammo FBX as PackedScene. Check Godot's import errors.")
-		return
-
-	var character := packed_scene.instantiate()
-	add_child(character)
-	var skeleton := _find_skeleton(character)
-	if skeleton == null:
-		push_warning("No Skeleton3D found. Stop here; do not retarget animations yet.")
-		return
-
-	print("Skeleton path: ", skeleton.get_path())
-	print("Bone count: ", skeleton.get_bone_count())
-	for i in range(skeleton.get_bone_count()):
-		print("Bone ", i, ": ", skeleton.get_bone_name(i))
-
-	var animation_player := _find_animation_player(character)
-	if animation_player == null:
-		print("No AnimationPlayer found in the model; this can be normal for a model-only FBX.")
+	print("\n=== Jammo + Motifect Body Slam inspection ===")
+	var character_scene := _load_first_scene(CHARACTER_CANDIDATE_PATHS)
+	if character_scene == null:
+		push_error("Jammo FBX scene could not be loaded.")
 	else:
-		print("Animation list: ", animation_player.get_animation_list())
-	print("Rig inspection finished. No Motifect animation has been applied.")
+		var character := character_scene.instantiate()
+		add_child(character)
+		var skeleton := _find_skeleton(character)
+		if skeleton == null:
+			push_error("Jammo scene has no Skeleton3D.")
+		else:
+			print("JAMMO_SKELETON_OK bones=", skeleton.get_bone_count())
+			print("JAMMO_BONE_NAMES=", _bone_names(skeleton))
+		var character_player := _find_animation_player(character)
+		print("JAMMO_ANIMATION_PLAYER=", character_player != null)
+		if character_player != null:
+			print("JAMMO_ANIMATIONS=", character_player.get_animation_list())
+
+	if not ResourceLoader.exists(BODY_SLAM_PATH):
+		push_error("Body Slam FBX is missing or has not been imported: " + BODY_SLAM_PATH)
+		return
+	var slam_scene := load(BODY_SLAM_PATH) as PackedScene
+	if slam_scene == null:
+		push_error("Godot could not load Body Slam FBX as PackedScene.")
+		return
+	var slam := slam_scene.instantiate()
+	add_child(slam)
+	var slam_skeleton := _find_skeleton(slam)
+	var slam_player := _find_animation_player(slam)
+	print("BODY_SLAM_SCENE_LOADED=true")
+	print("BODY_SLAM_SKELETON_BONES=", slam_skeleton.get_bone_count() if slam_skeleton != null else -1)
+	if slam_player == null:
+		push_error("Body Slam FBX loaded but no AnimationPlayer was found; clip cannot be retargeted yet.")
+	else:
+		print("BODY_SLAM_ANIMATIONS=", slam_player.get_animation_list())
+		if slam_player.get_animation_list().is_empty():
+			push_error("AnimationPlayer exists but contains no animations.")
+		else:
+			print("BODY_SLAM_CLIP_FOUND=true")
+	print("NOTE: This diagnostic inspects both rigs; it does not claim the clip is retargeted onto Jammo.")
 	print("=== END ===")
+
+func _load_first_scene(paths: Array) -> PackedScene:
+	for path in paths:
+		if ResourceLoader.exists(path):
+			print("Loading Jammo from ", path)
+			return load(path) as PackedScene
+	return null
 
 func _find_skeleton(root: Node) -> Skeleton3D:
 	if root is Skeleton3D:
@@ -62,3 +74,9 @@ func _find_animation_player(root: Node) -> AnimationPlayer:
 		if found != null:
 			return found
 	return null
+
+func _bone_names(skeleton: Skeleton3D) -> PackedStringArray:
+	var names := PackedStringArray()
+	for i in range(skeleton.get_bone_count()):
+		names.append(skeleton.get_bone_name(i))
+	return names

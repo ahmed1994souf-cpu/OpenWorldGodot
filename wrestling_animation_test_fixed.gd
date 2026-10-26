@@ -39,15 +39,25 @@ func _ready() -> void:
 	var slam_player := _find_animation_player(slam)
 	print("BODY_SLAM_SCENE_LOADED=true")
 	print("BODY_SLAM_SKELETON_BONES=", slam_skeleton.get_bone_count() if slam_skeleton != null else -1)
+	if slam_skeleton != null:
+		print("BODY_SLAM_BONE_NAMES=", _bone_names(slam_skeleton))
 	if slam_player == null:
 		push_error("Body Slam FBX loaded but no AnimationPlayer was found; clip cannot be retargeted yet.")
 	else:
-		print("BODY_SLAM_ANIMATIONS=", slam_player.get_animation_list())
-		if slam_player.get_animation_list().is_empty():
+		var animation_names := slam_player.get_animation_list()
+		print("BODY_SLAM_ANIMATIONS=", animation_names)
+		if animation_names.is_empty():
 			push_error("AnimationPlayer exists but contains no animations.")
 		else:
 			print("BODY_SLAM_CLIP_FOUND=true")
-	print("NOTE: This diagnostic inspects both rigs; it does not claim the clip is retargeted onto Jammo.")
+			for animation_name in animation_names:
+				var animation := slam_player.get_animation(animation_name)
+				if animation == null:
+					continue
+				print("CLIP_INFO name=", animation_name, " length=", animation.length, " tracks=", animation.get_track_count())
+				for track_index in range(animation.get_track_count()):
+					print("CLIP_TRACK path=", animation.track_get_path(track_index), " type=", animation.track_get_type(track_index))
+	print("NOTE: This diagnostic inspects rigs and track paths; it does not claim the clip is retargeted onto Jammo.")
 	print("=== END ===")
 
 func _load_first_scene(paths: Array) -> PackedScene:

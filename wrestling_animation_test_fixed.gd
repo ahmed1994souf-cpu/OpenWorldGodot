@@ -23,6 +23,7 @@ func _ready() -> void:
 		else:
 			print("JAMMO_SKELETON_OK bones=", skeleton.get_bone_count())
 			print("JAMMO_BONE_NAMES=", _bone_names(skeleton))
+			_report_rig_structure(skeleton, "JAMMO")
 		var character_player := _find_animation_player(character)
 		print("JAMMO_ANIMATION_PLAYER=", character_player != null)
 		if character_player != null:
@@ -43,6 +44,7 @@ func _ready() -> void:
 	print("BODY_SLAM_SKELETON_BONES=", slam_skeleton.get_bone_count() if slam_skeleton != null else -1)
 	if slam_skeleton != null:
 		print("BODY_SLAM_BONE_NAMES=", _bone_names(slam_skeleton))
+		_report_rig_structure(slam_skeleton, "BODY_SLAM")
 	if character_skeleton != null and slam_skeleton != null:
 		_report_bone_name_overlap(character_skeleton, slam_skeleton)
 	if slam_player == null:
@@ -118,3 +120,14 @@ func _bone_names(skeleton: Skeleton3D) -> PackedStringArray:
 	for i in range(skeleton.get_bone_count()):
 		names.append(skeleton.get_bone_name(i))
 	return names
+
+
+# Prints parent relationships and local rest transforms to assess rig compatibility.
+func _report_rig_structure(skeleton: Skeleton3D, label: String) -> void:
+	print(label, "_RIG_STRUCTURE_BEGIN")
+	for i in range(skeleton.get_bone_count()):
+		var bone_name := skeleton.get_bone_name(i)
+		var parent_index := skeleton.get_bone_parent(i)
+		var rest := skeleton.get_bone_rest(i)
+		print(label, "_BONE index=", i, " name=", bone_name, " parent=", parent_index, " parent_name=", skeleton.get_bone_name(parent_index) if parent_index >= 0 else "<root>", " rest_origin=", rest.origin, " rest_basis=", rest.basis)
+	print(label, "_RIG_STRUCTURE_END")

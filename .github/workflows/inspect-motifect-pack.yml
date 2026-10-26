@@ -1,0 +1,65 @@
+name: Inspect Motifect Pack
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Inspect animation archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARCHIVE="Motifect_martial_arts_v1_0.zip"
+          REPORT="motifect-inspection-report.txt"
+
+          {
+            echo "Motifect animation archive inspection"
+            echo "====================================="
+            echo "Archive: $ARCHIVE"
+            echo
+            if [ ! -f "$ARCHIVE" ]; then
+              echo "ERROR: archive not found at repository root."
+              exit 1
+            fi
+
+            echo "Archive file details:"
+            ls -lh "$ARCHIVE"
+            file "$ARCHIVE"
+            echo
+            echo "ZIP integrity test:"
+            unzip -t "$ARCHIVE"
+            echo
+            echo "Archive contents (first 500 entries):"
+            unzip -Z1 "$ARCHIVE" | sed -n '1,500p'
+            echo
+            echo "Counts by file extension:"
+            unzip -Z1 "$ARCHIVE" | awk '
+              {
+                n=$0
+                if (n !~ /\./) ext="[no extension]"
+                else { sub(/^.*\./,"",n); ext="." tolower(n) }
+                count[ext]++
+              }
+              END { for (e in count) print e, count[e] }
+            ' | sort
+            echo
+            echo "Wrestling / throw / reaction filename candidates:"
+            unzip -Z1 "$ARCHIVE" | grep -Ei 'slam|suplex|power.?bomb|body.?slam|clothesline|throw|fall|hit|impact|reaction|wrestl|judo|grapple' || true
+          } 2>&1 | tee "$REPORT"
+
+      - name: Upload inspection report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: motifect-inspection-report
+          path: motifect-inspection-report.txt
+          if-no-files-found: warn
+          retention-days: 7

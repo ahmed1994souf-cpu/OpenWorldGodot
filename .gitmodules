@@ -1,0 +1,3 @@
+[submodule "assets/characters/jammo/Jammo-Character"]
+	path = assets/characters/jammo/Jammo-Character
+	url = https://github.com/mixandjam/Jammo-Character.git

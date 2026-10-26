@@ -20,23 +20,23 @@ jobs:
           submodules: recursive
           lfs: true
 
-      - name: Set up Godot 4.7.2
-        uses: chickensoft-games/setup-godot@v2
-        with:
-          version: 4.7.2
-          use-dotnet: false
-
-      - name: Confirm Jammo and Body Slam source files
+      - name: Extract only Body Slam FBX from Motifect pack
         shell: bash
         run: |
           set -eu
           test -s Jammo_LowPoly.fbx
           test -s Motifect_martial_arts_v1_0.zip
           unzip -t Motifect_martial_arts_v1_0.zip
-          unzip -l Motifect_martial_arts_v1_0.zip | grep -i 'wrestling_body_slam.fbx'
+          entry="$(unzip -Z1 Motifect_martial_arts_v1_0.zip | grep -i 'wrestling_body_slam\.fbx$' | head -n 1)"
+          test -n "$entry"
+          mkdir -p assets/animations/motifect
+          unzip -p Motifect_martial_arts_v1_0.zip "$entry" > assets/animations/motifect/wrestling_body_slam.fbx
+          test -s assets/animations/motifect/wrestling_body_slam.fbx
+          echo "Extracted $entry"
+          ls -lh assets/animations/motifect/wrestling_body_slam.fbx
 
-      - name: Import project with Godot
+      - name: Import project and FBX assets with Godot
         run: godot --headless --path . --editor --import
 
-      - name: Run isolated Jammo rig test
-        run: godot --headless --path . --path . wrestling_animation_test_fixed.tscn --quit-after 5
+      - name: Run isolated Jammo and Body Slam inspection
+        run: godot --headless --path . wrestling_animation_test_fixed.tscn --quit-after 5

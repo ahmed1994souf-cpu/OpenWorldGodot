@@ -1,0 +1,42 @@
+name: Test Jammo Body Slam
+
+on:
+  push:
+    paths:
+      - ".github/workflows/test-jammo-bodyslam.yml"
+      - "Jammo_LowPoly.fbx"
+      - "Motifect_martial_arts_v1_0.zip"
+      - "wrestling_animation_test_fixed.gd"
+      - "wrestling_animation_test_fixed.tscn"
+  workflow_dispatch:
+
+jobs:
+  test-jammo-bodyslam:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout project and animation assets
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: true
+
+      - name: Set up Godot 4.7.2
+        uses: chickensoft-games/setup-godot@v2
+        with:
+          version: 4.7.2
+          use-dotnet: false
+
+      - name: Confirm Jammo and Body Slam source files
+        shell: bash
+        run: |
+          set -eu
+          test -s Jammo_LowPoly.fbx
+          test -s Motifect_martial_arts_v1_0.zip
+          unzip -t Motifect_martial_arts_v1_0.zip
+          unzip -l Motifect_martial_arts_v1_0.zip | grep -i 'wrestling_body_slam.fbx'
+
+      - name: Import project with Godot
+        run: godot --headless --path . --editor --import
+
+      - name: Run isolated Jammo rig test
+        run: godot --headless --path . --path . wrestling_animation_test_fixed.tscn --quit-after 5

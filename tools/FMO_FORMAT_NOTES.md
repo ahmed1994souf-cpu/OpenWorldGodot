@@ -76,3 +76,19 @@ The supplied four-file output adds these cross-sample observations:
 - Some preceding four-byte values decode cleanly as float32 (for example, `CD CC CC 3F` = 1.6 and `CD CC CC 3E` = 0.4), while other four-byte patterns are non-floats or sentinel-like values. This mixed pattern warns against treating the whole area as a simple array of floats.
 
 These observations improve the map of candidate fields but still do not establish which values are animation keys, indices, flags, or static bone metadata. No decoder or GLB exporter should be claimed from this evidence alone.
+
+
+## Additional printable-string scan
+
+A printable ASCII scan (runs of at least three bytes) was run on the four supplied FMO samples. In addition to the bone-like labels, it detected marker strings including:
+
+- `L_FOOT` and `R_FOOT`
+- `HAND_L` and `HAND_R`
+- `SHAPE_HANDLE_L` and `SHAPE_HANDLE_R`
+- `FACE` in `Z_BELLY2BELLY_N.FMO`
+
+Observed positions vary by sample. For example, `L_FOOT` appears at 0x0340 (Suplex N), 0x02E0 (Suplex Y), 0x03BC (Belly2Belly N), and 0x03E0 (Belly2Belly Y). `HAND_R` appears at 0x0D14, 0x08C4, 0x1024, and 0x0BF8, respectively. These are literal string offsets from the supplied scan, not decoded semantic fields.
+
+The scan also finds short printable runs such as `33s@`, `ff6A`, and `#<>`. Since these occur among binary data and vary across samples, they should be treated as incidental printable byte sequences unless further evidence identifies them as meaningful markers. The scan is useful for locating candidate labels, but it does not by itself identify animation frames or track encodings.
+
+Current conclusion remains unchanged: no verified track/keyframe decoder or GLB exporter is implemented.

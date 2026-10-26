@@ -27,6 +27,9 @@ jobs:
           test -s Jammo_LowPoly.fbx
           test -s Motifect_martial_arts_v1_0.zip
           unzip -t Motifect_martial_arts_v1_0.zip
+          echo "=== Wrestling animation candidates in the archive ==="
+          unzip -Z1 Motifect_martial_arts_v1_0.zip | grep -Ei "(suplex|body.?slam|power.?bomb|clothesline|wrestling|grapple|throw|takedown|pin|submission).*\\.fbx$" || true
+          echo "=== End candidates ==="
           entry="$(unzip -Z1 Motifect_martial_arts_v1_0.zip | grep -i 'wrestling_body_slam\.fbx$' | head -n 1)"
           test -n "$entry"
           mkdir -p assets/animations/motifect

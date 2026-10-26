@@ -9,6 +9,7 @@ const BODY_SLAM_PATH := "res://assets/animations/motifect/wrestling_body_slam.fb
 
 func _ready() -> void:
 	print("\n=== Jammo + Motifect Body Slam inspection ===")
+	var character_skeleton: Skeleton3D = null
 	var character_scene := _load_first_scene(CHARACTER_CANDIDATE_PATHS)
 	if character_scene == null:
 		push_error("Jammo FBX scene could not be loaded.")
@@ -16,6 +17,7 @@ func _ready() -> void:
 		var character := character_scene.instantiate()
 		add_child(character)
 		var skeleton := _find_skeleton(character)
+		character_skeleton = skeleton
 		if skeleton == null:
 			push_error("Jammo scene has no Skeleton3D.")
 		else:
@@ -41,6 +43,8 @@ func _ready() -> void:
 	print("BODY_SLAM_SKELETON_BONES=", slam_skeleton.get_bone_count() if slam_skeleton != null else -1)
 	if slam_skeleton != null:
 		print("BODY_SLAM_BONE_NAMES=", _bone_names(slam_skeleton))
+	if character_skeleton != null and slam_skeleton != null:
+		_report_bone_name_overlap(character_skeleton, slam_skeleton)
 	if slam_player == null:
 		push_error("Body Slam FBX loaded but no AnimationPlayer was found; clip cannot be retargeted yet.")
 	else:
@@ -84,6 +88,30 @@ func _find_animation_player(root: Node) -> AnimationPlayer:
 		if found != null:
 			return found
 	return null
+
+func _normalized_bone_name(name: String) -> String:
+	var normalized := name
+	if normalized.begins_with("mixamorig_"):
+		normalized = normalized.trim_prefix("mixamorig_")
+	return normalized.to_lower().replace("_", "").replace(" ", "")
+
+func _report_bone_name_overlap(target: Skeleton3D, source: Skeleton3D) -> void:
+	var target_names := {}
+	for i in range(target.get_bone_count()):
+		target_names[_normalized_bone_name(target.get_bone_name(i))] = target.get_bone_name(i)
+	var matched := PackedStringArray()
+	var unmatched := PackedStringArray()
+	for i in range(source.get_bone_count()):
+		var source_name := source.get_bone_name(i)
+		var key := _normalized_bone_name(source_name)
+		if target_names.has(key):
+			matched.append(source_name + " -> " + str(target_names[key]))
+		else:
+			unmatched.append(source_name)
+	print("BONE_NAME_MATCH_COUNT=", matched.size(), "/", source.get_bone_count())
+	print("BONE_NAME_MATCHES=", matched)
+	print("BONE_NAME_UNMATCHED_SOURCE=", unmatched)
+	print("NOTE: Name overlap is diagnostic only; it does not validate rest-pose compatibility or retarget the animation.")
 
 func _bone_names(skeleton: Skeleton3D) -> PackedStringArray:
 	var names := PackedStringArray()

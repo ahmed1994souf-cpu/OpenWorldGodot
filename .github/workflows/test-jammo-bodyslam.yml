@@ -36,7 +36,7 @@ jobs:
           ls -lh assets/animations/motifect/wrestling_body_slam.fbx
 
       - name: Import project and FBX assets with Godot
-        run: godot --headless --path . --editor --import
+        run: "$GODOT" --headless --path . --editor --import
 
       - name: Run isolated Jammo and Body Slam inspection
-        run: godot --headless --path . wrestling_animation_test_fixed.tscn --quit-after 5
+        run: "$GODOT" --headless --path . wrestling_animation_test_fixed.tscn --quit-after 5
